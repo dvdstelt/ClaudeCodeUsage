@@ -132,6 +132,45 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         // omitted rather than shown disabled.
         if (!claudeCodeCredentialsAvailable())
             this._addAuthGroup(page, settings);
+
+        this._addAboutGroup(page);
+    }
+
+    // Adds an About group crediting the author, showing the version, and
+    // linking to the project page.
+    _addAboutGroup(page) {
+        const about = new Adw.PreferencesGroup({title: 'About'});
+        page.add(about);
+
+        about.add(new Adw.ActionRow({
+            title: 'Created by',
+            subtitle: 'Dennis van der Stelt',
+        }));
+
+        const version = this.metadata['version-name'] ?? String(this.metadata.version ?? '');
+        if (version) {
+            about.add(new Adw.ActionRow({
+                title: 'Version',
+                subtitle: version,
+            }));
+        }
+
+        const url = this.metadata.url;
+        if (url) {
+            const linkRow = new Adw.ActionRow({
+                title: 'Project page',
+                subtitle: url,
+                activatable: true,
+            });
+            linkRow.add_suffix(new Gtk.Image({
+                icon_name: 'adw-external-link-symbolic',
+                valign: Gtk.Align.CENTER,
+            }));
+            linkRow.connect('activated', () => {
+                Gio.AppInfo.launch_default_for_uri(url, null);
+            });
+            about.add(linkRow);
+        }
     }
 
     // Adds an Authentication group with a PKCE OAuth sign-in flow: Connect opens
