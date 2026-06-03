@@ -1,0 +1,10 @@
+{
+  "uuid": "claude-usage@dvdstelt.github.io",
+  "name": "Claude Code Usage Monitor",
+  "description": "Shows your Claude subscription tier and live usage limits (5-hour and 7-day windows) in the top bar. Reads your existing Claude Code credentials; no extra login required.",
+  "shell-version": ["48", "49", "50"],
+  "url": "https://github.com/dvdstelt/ClaudeExtension",
+  "settings-schema": "org.gnome.shell.extensions.claude-usage",
+  "version": 1,
+  "version-name": "0.1.0"
+}
