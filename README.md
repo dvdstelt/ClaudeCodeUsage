@@ -49,10 +49,10 @@ The extension source lives in `src/`. Symlink that directory into the GNOME
 extensions folder:
 
 ```sh
-git clone https://github.com/dvdstelt/ClaudeExtension.git
-ln -s "$PWD/ClaudeExtension/src" \
+git clone https://github.com/dvdstelt/ClaudeCodeUsage.git
+ln -s "$PWD/ClaudeCodeUsage/src" \
   ~/.local/share/gnome-shell/extensions/claude-usage@dvdstelt.github.io
-glib-compile-schemas "$PWD/ClaudeExtension/src/schemas/"
+glib-compile-schemas "$PWD/ClaudeCodeUsage/src/schemas/"
 gnome-extensions enable claude-usage@dvdstelt.github.io
 ```
 

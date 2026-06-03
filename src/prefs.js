@@ -142,7 +142,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         const footer = new Adw.PreferencesGroup();
         page.add(footer);
 
-        const url = this.metadata.url ?? 'https://github.com/dvdstelt/ClaudeExtension';
+        const url = this.metadata.url ?? 'https://github.com/dvdstelt/ClaudeCodeUsage';
         const issuesUrl = `${url}/issues/new`;
 
         const buttons = new Gtk.Box({
