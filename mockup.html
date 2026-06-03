@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Claude Usage - GNOME extension mockup</title>
+<style>
+  :root{
+    --accent:#3584e4; --accent2:#62a0ea;
+    --warn:#e66100; --danger:#e01b24; --good:#33d17a;
+    --bg:#242424; --bg2:#2d2d2d; --bg3:#363636;
+    --line:rgba(255,255,255,.09);
+    --txt:#ffffff; --dim:rgba(255,255,255,.55); --dim2:rgba(255,255,255,.38);
+    --font:'Cantarell','Inter','Segoe UI',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:var(--font);
+    background:
+      radial-gradient(1200px 700px at 70% -10%, #5b3a8a 0%, transparent 55%),
+      radial-gradient(900px 600px at 10% 110%, #1c4a6e 0%, transparent 55%),
+      linear-gradient(135deg,#241b33 0%,#12161f 100%);
+    min-height:100vh; color:var(--txt); -webkit-font-smoothing:antialiased;
+    padding-bottom:60px;
+  }
+  /* ===== top panel ===== */
+  .panel{
+    height:34px; background:rgba(0,0,0,.55); backdrop-filter:blur(18px);
+    display:flex; align-items:center; padding:0 12px; font-size:13.5px;
+    font-weight:600; color:rgba(255,255,255,.92); position:relative;
+    border-bottom:1px solid rgba(255,255,255,.04);
+  }
+  .panel .clock{position:absolute;left:50%;transform:translateX(-50%)}
+  .panel .right{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .sys-icons{display:flex;gap:9px;opacity:.85;font-size:13px}
+  /* the extension's panel button */
+  .indicator{
+    display:flex;align-items:center;gap:7px;padding:3px 9px;border-radius:8px;
+    background:rgba(255,255,255,.14); cursor:default;
+  }
+  .ring{width:17px;height:17px;border-radius:50%;
+    background:conic-gradient(var(--good) 0 7%, rgba(255,255,255,.18) 7% 100%);
+    display:grid;place-items:center}
+  .ring::after{content:"";width:11px;height:11px;border-radius:50%;background:#2c2230}
+  .indicator .lbl{font-size:12.5px;font-weight:700;letter-spacing:.2px}
+  .indicator .sub{font-size:10.5px;color:rgba(255,255,255,.6);font-weight:600}
+
+  /* ===== dropdown popup ===== */
+  .pop{
+    position:absolute; top:42px; right:16px; width:340px;
+    background:var(--bg); border:1px solid var(--line); border-radius:16px;
+    box-shadow:0 18px 50px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
+    overflow:hidden;
+  }
+  .pop::before{ /* little arrow */
+    content:"";position:absolute;top:-7px;right:46px;width:14px;height:14px;
+    background:var(--bg);border-left:1px solid var(--line);border-top:1px solid var(--line);
+    transform:rotate(45deg);
+  }
+  .head{padding:15px 16px 13px;display:flex;align-items:center;gap:11px;
+    border-bottom:1px solid var(--line)}
+  .logo{width:34px;height:34px;border-radius:9px;flex:none;
+    background:linear-gradient(135deg,#d97757,#c15f3c);
+    display:grid;place-items:center;font-weight:800;font-size:18px;color:#1a1209}
+  .head .who{font-size:14px;font-weight:700;line-height:1.2}
+  .head .mail{font-size:11.5px;color:var(--dim);margin-top:1px}
+  .pill{margin-left:auto;font-size:11px;font-weight:800;letter-spacing:.4px;
+    padding:4px 9px;border-radius:999px;color:#ffd9a8;
+    background:rgba(230,97,0,.16);border:1px solid rgba(230,97,0,.4)}
+
+  .sec{padding:13px 16px}
+  .sec+.sec{border-top:1px solid var(--line)}
+  .sec-t{font-size:10.5px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;
+    color:var(--dim2);margin-bottom:11px;display:flex;align-items:center;gap:6px}
+
+  .meter{margin-bottom:13px}
+  .meter:last-child{margin-bottom:0}
+  .meter .row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px}
+  .meter .name{font-size:13px;font-weight:600}
+  .meter .name .tag{font-size:10px;color:var(--dim);font-weight:600;margin-left:6px}
+  .meter .pct{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
+  .bar{height:7px;border-radius:99px;background:rgba(255,255,255,.10);overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:99px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .bar.g i{background:linear-gradient(90deg,#26a269,#33d17a)}
+  .bar.w i{background:linear-gradient(90deg,#e66100,#ffa348)}
+  .reset{font-size:11px;color:var(--dim);margin-top:5px;display:flex;gap:6px;align-items:center}
+  .reset b{color:rgba(255,255,255,.8);font-weight:700}
+
+  .kv{display:flex;align-items:center;gap:9px;font-size:13px;padding:5px 0}
+  .kv .dot{width:8px;height:8px;border-radius:50%;background:var(--good);
+    box-shadow:0 0 0 3px rgba(51,209,122,.18);flex:none}
+  .kv .k{color:var(--dim)}
+  .kv .v{margin-left:auto;font-weight:700}
+  .credit{font-size:12px;color:var(--dim);margin-top:7px;display:flex;justify-content:space-between}
+  .credit b{color:rgba(255,255,255,.85)}
+
+  .proj{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:9px;font-size:12.5px}
+  .proj:hover{background:var(--bg3)}
+  .proj .ic{width:9px;height:9px;border-radius:2px;background:var(--accent);flex:none;opacity:.8}
+  .proj .p{font-weight:600}
+  .proj .m{margin-left:auto;color:var(--dim2);font-size:11px}
+
+  .actions{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+  .btn{flex:1;text-align:center;padding:9px;border-radius:10px;font-size:12.5px;
+    font-weight:700;background:var(--bg3);border:1px solid var(--line);cursor:default}
+  .btn.pri{background:var(--accent);border-color:transparent;color:#fff}
+
+  .foot{padding:9px 16px;font-size:11px;color:var(--dim2);display:flex;
+    align-items:center;justify-content:space-between;background:rgba(0,0,0,.18)}
+  .foot .rf{color:var(--accent2);font-weight:700}
+
+  .caption{max-width:760px;margin:26px auto 0;text-align:center;color:rgba(255,255,255,.6);
+    font-size:13px;line-height:1.6;padding:0 20px}
+  .caption b{color:#fff}
+</style>
+</head>
+<body>
+  <div class="panel">
+    <span style="font-weight:700">Activities</span>
+    <span class="clock">Wed 15:00</span>
+    <div class="right">
+      <div class="indicator" title="Claude usage">
+        <span class="ring"></span>
+        <span class="lbl">7%</span>
+        <span class="sub">MAX</span>
+      </div>
+      <span class="sys-icons">&#9776;</span>
+    </div>
+  </div>
+
+  <div class="pop">
+    <div class="head">
+      <div class="logo">C</div>
+      <div>
+        <div class="who">Dennis van der Stelt</div>
+        <div class="mail">Claude Code &middot; active</div>
+      </div>
+      <div class="pill">MAX &middot; 5&times;</div>
+    </div>
+
+    <!-- limits -->
+    <div class="sec">
+      <div class="sec-t">Usage limits</div>
+
+      <div class="meter">
+        <div class="row"><span class="name">5-hour window</span><span class="pct">2%</span></div>
+        <div class="bar g"><i style="width:2%"></i></div>
+        <div class="reset">&#8635; Resets in <b>1h 50m</b> &middot; 17:50</div>
+      </div>
+
+      <div class="meter">
+        <div class="row"><span class="name">7-day window</span><span class="pct">7%</span></div>
+        <div class="bar"><i style="width:7%"></i></div>
+        <div class="reset">&#8635; Resets <b>Sat 06:00</b></div>
+      </div>
+
+      <div class="meter">
+        <div class="row"><span class="name">7-day Sonnet<span class="tag">per-model</span></span><span class="pct" style="color:var(--dim)">0%</span></div>
+        <div class="bar"><i style="width:0%"></i></div>
+      </div>
+
+      <div class="credit"><span>Extra usage credits</span><span><b>&euro;0.00</b> / &euro;42.50</span></div>
+    </div>
+
+    <!-- live status -->
+    <div class="sec">
+      <div class="sec-t">Right now</div>
+      <div class="kv"><span class="dot"></span><span class="k">Session</span><span class="v">Active &middot; Opus 4.8</span></div>
+      <div class="kv"><span class="dot" style="background:var(--accent);box-shadow:0 0 0 3px rgba(53,132,228,.18)"></span><span class="k">MCP servers</span><span class="v">1 connected</span></div>
+    </div>
+
+    <!-- recent projects -->
+    <div class="sec">
+      <div class="sec-t">Recent projects</div>
+      <div class="proj"><span class="ic"></span><span class="p">ClaudeExtension</span><span class="m">just now</span></div>
+      <div class="proj"><span class="ic"></span><span class="p">OmNomNom</span><span class="m">2h ago &middot; 184k tok</span></div>
+      <div class="proj"><span class="ic"></span><span class="p">scoracle</span><span class="m">yesterday</span></div>
+    </div>
+
+    <div class="actions">
+      <div class="btn pri">Open Claude Desktop</div>
+      <div class="btn">New session</div>
+    </div>
+
+    <div class="foot"><span>Updated 12s ago</span><span class="rf">&#8635; Refresh</span></div>
+  </div>
+
+  <div class="caption">
+    Mockup of the <b>Claude Usage</b> GNOME panel indicator. The collapsed button (top-right)
+    shows the 7-day ring and tier; clicking it opens this dropdown. Numbers are pulled live from
+    <b>/api/oauth/usage</b> and <b>/api/oauth/profile</b> using your existing token. Greyed-out
+    rows (Opus n/a) hide automatically when the API returns null.
+  </div>
+</body>
+</html>
