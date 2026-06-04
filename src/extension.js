@@ -345,21 +345,11 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
         // actions
         const actions = new St.BoxLayout({style_class: 'cu-actions'});
-        const openDesktop = new St.Button({label: 'Open Claude Desktop', style_class: 'cu-btn cu-btn-pri', x_expand: true});
-        openDesktop.connect('clicked', () => {
-            this.menu.close();
-            try {
-                GLib.spawn_command_line_async('claude-desktop');
-            } catch (e) {
-                logError(e, 'claude-usage: failed to launch claude-desktop');
-            }
-        });
-        const openUsage = new St.Button({label: 'Usage page', style_class: 'cu-btn', x_expand: true});
+        const openUsage = new St.Button({label: 'Usage page', style_class: 'cu-btn cu-btn-pri', x_expand: true});
         openUsage.connect('clicked', () => {
             this.menu.close();
             Gio.AppInfo.launch_default_for_uri(USAGE_SETTINGS_URL, null);
         });
-        actions.add_child(openDesktop);
         actions.add_child(openUsage);
         root.add_child(actions);
 
