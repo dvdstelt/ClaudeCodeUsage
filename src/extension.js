@@ -231,6 +231,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._openPreferences = openPreferences;
         this._client = new UsageClient(settings);
         this._busy = false;
+        this._destroyed = false;
+        this._cancellable = new Gio.Cancellable();
         this._lastUsage = null;
         this._lastFetchMs = 0;
         this._settingsIds = [];
@@ -343,21 +345,11 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
         // actions
         const actions = new St.BoxLayout({style_class: 'cu-actions'});
-        const openDesktop = new St.Button({label: 'Open Claude Desktop', style_class: 'cu-btn cu-btn-pri', x_expand: true});
-        openDesktop.connect('clicked', () => {
-            this.menu.close();
-            try {
-                GLib.spawn_command_line_async('claude-desktop');
-            } catch (e) {
-                logError(e, 'claude-usage: failed to launch claude-desktop');
-            }
-        });
-        const openUsage = new St.Button({label: 'Usage page', style_class: 'cu-btn', x_expand: true});
+        const openUsage = new St.Button({label: 'Usage page', style_class: 'cu-btn cu-btn-pri', x_expand: true});
         openUsage.connect('clicked', () => {
             this.menu.close();
             Gio.AppInfo.launch_default_for_uri(USAGE_SETTINGS_URL, null);
         });
-        actions.add_child(openDesktop);
         actions.add_child(openUsage);
         root.add_child(actions);
 
@@ -402,15 +394,31 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._busy = true;
         this._lastFetchMs = Date.now();
 
-        Promise.all([this._client.fetchUsage(), this._client.fetchProfile()])
-            .then(([usage, profile]) => this._render(usage, profile))
-            .catch(e => this._renderError(e))
-            .finally(() => {
-                this._busy = false;
-            });
+        // Usage is required; the profile is cosmetic (name and tier pill), so a
+        // profile failure must not blank out otherwise-good usage data. Run
+        // both in parallel and only surface an error when usage itself fails.
+        Promise.allSettled([
+            this._client.fetchUsage(this._cancellable),
+            this._client.fetchProfile(this._cancellable),
+        ]).then(([usageRes, profileRes]) => {
+            if (this._destroyed)
+                return;
+            if (usageRes.status === 'rejected') {
+                this._renderError(usageRes.reason);
+                return;
+            }
+            if (profileRes.status === 'rejected')
+                logError(profileRes.reason, 'claude-usage: profile fetch failed (non-fatal)');
+            this._render(usageRes.value,
+                profileRes.status === 'fulfilled' ? profileRes.value : null);
+        }).finally(() => {
+            this._busy = false;
+        });
     }
 
     _render(usage, profile) {
+        if (this._destroyed)
+            return;
         this._error.visible = false;
         this._lastUsage = usage;
 
@@ -457,8 +465,20 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         const xu = usage.extra_usage;
         if (xu && xu.is_enabled) {
             const cur = xu.currency || '';
+            // NOTE: the units of used_credits and monthly_limit are not
+            // confirmed against a live extra_usage payload. We scale both the
+            // same way (treating them as minor units, e.g. cents) so the two
+            // numbers are at least consistent; the previous code scaled only
+            // monthly_limit, which could not be right for both. Verify against
+            // real data and adjust the divisor if needed.
+            const money = v => Number.isFinite(v) ? `${cur} ${(v / 100).toFixed(2)}`.trim() : null;
+            const used = money(Number(xu.used_credits));
+            const limit = money(Number(xu.monthly_limit));
+            const parts = [used ?? `${cur} 0.00`.trim()];
+            if (limit && Number(xu.monthly_limit) > 0)
+                parts.push(limit);
             this._extra.visible = true;
-            this._extra.text = `Extra usage: ${cur} ${(xu.used_credits ?? 0).toFixed(2)} / ${cur} ${(xu.monthly_limit / 100).toFixed(2)}`;
+            this._extra.text = `Extra usage: ${parts.join(' / ')}`;
         } else {
             this._extra.visible = false;
         }
@@ -578,6 +598,12 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     }
 
     _renderError(e) {
+        if (this._destroyed)
+            return;
+        // A cancelled request (the extension is being torn down) is not an
+        // error worth showing; the destroyed guard above usually catches it.
+        if (e instanceof GLib.Error && e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+            return;
         // A 429 is transient (we polled a touch too soon). If we already have
         // usage on screen, keep showing it instead of flashing an error.
         if (e instanceof UsageError && e.status === 429 && this._lastUsage) {
@@ -602,6 +628,11 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._destroyed = true;
+        // Abort any in-flight fetch so its callback can't touch torn-down
+        // actors or the now-null settings object.
+        this._cancellable?.cancel();
+        this._cancellable = null;
         if (this._timer) {
             GLib.source_remove(this._timer);
             this._timer = null;

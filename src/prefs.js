@@ -132,6 +132,60 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         // omitted rather than shown disabled.
         if (!claudeCodeCredentialsAvailable())
             this._addAuthGroup(page, settings);
+
+        this._addAboutGroup(page);
+    }
+
+    // Adds a centered footer crediting the author, linking to the project for
+    // bug reports and feature requests, and showing the version.
+    _addAboutGroup(page) {
+        const footer = new Adw.PreferencesGroup();
+        page.add(footer);
+
+        const url = this.metadata.url ?? 'https://github.com/dvdstelt/ClaudeCodeUsage';
+        const issuesUrl = `${url}/issues/new`;
+
+        const buttons = new Gtk.Box({
+            spacing: 8,
+            margin_bottom: 16,
+            halign: Gtk.Align.CENTER,
+        });
+        buttons.append(this._buildLinkButton('Report a bug', issuesUrl));
+        buttons.append(this._buildLinkButton('Request a feature', issuesUrl));
+        footer.add(buttons);
+
+        footer.add(new Gtk.Label({
+            label: 'Have an issue, want to suggest a feature, or contribute?',
+            margin_bottom: 4,
+        }));
+        footer.add(new Gtk.Label({
+            label: `Open a new issue on <a href="${url}">GitHub</a>!`,
+            use_markup: true,
+            margin_bottom: 24,
+        }));
+
+        footer.add(new Gtk.Label({
+            label: 'Created by <b>Dennis van der Stelt</b>',
+            use_markup: true,
+            margin_bottom: 4,
+        }));
+
+        const version = this.metadata['version-name'] ?? String(this.metadata.version ?? '');
+        if (version) {
+            footer.add(new Gtk.Label({
+                label: `· Claude Code Usage Monitor v${version} ·`,
+                css_classes: ['dim-label'],
+            }));
+        }
+    }
+
+    // A plain button that opens a URL in the default browser.
+    _buildLinkButton(label, uri) {
+        const btn = new Gtk.Button({label, hexpand: false});
+        btn.connect('clicked', () => {
+            Gio.AppInfo.launch_default_for_uri(uri, null);
+        });
+        return btn;
     }
 
     // Adds an Authentication group with a PKCE OAuth sign-in flow: Connect opens

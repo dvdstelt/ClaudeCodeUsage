@@ -60,6 +60,8 @@ export class UsageClient {
         this._settings = settings;
         this._session = new Soup.Session();
         this._session.timeout = 15;
+        // Shared in-flight token resolution; see _validToken().
+        this._tokenPromise = null;
     }
 
     // Reads Claude Code's credentials, or returns null when absent/unusable.
@@ -85,7 +87,7 @@ export class UsageClient {
         file.replace_contents(data, null, false, Gio.FileCreateFlags.PRIVATE, null);
     }
 
-    _request(method, url, {token, jsonBody} = {}) {
+    _request(method, url, {token, jsonBody, cancellable = null} = {}) {
         return new Promise((resolve, reject) => {
             const msg = Soup.Message.new(method, url);
             const headers = msg.get_request_headers();
@@ -99,7 +101,7 @@ export class UsageClient {
                 msg.set_request_body_from_bytes('application/json', new GLib.Bytes(raw));
             }
 
-            this._session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null, (session, res) => {
+            this._session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, cancellable, (session, res) => {
                 try {
                     const bytes = session.send_and_read_finish(res);
                     // Read the raw integer; msg.get_status() marshals to the
@@ -174,7 +176,23 @@ export class UsageClient {
     // Returns a valid access token, refreshing (and persisting) if close to
     // expiry. Prefers Claude Code's credentials; falls back to the extension's
     // own OAuth tokens when Claude Code is not signed in.
-    async _validToken() {
+    //
+    // Concurrent callers share one in-flight resolution: fetchUsage and
+    // fetchProfile run in parallel, and without this a near-expiry token would
+    // be refreshed twice at once. Two simultaneous refresh-token exchanges can
+    // each rotate the refresh token and clobber the other's persisted
+    // credentials, so we deduplicate to a single refresh.
+    _validToken() {
+        if (!this._tokenPromise) {
+            this._tokenPromise = this._resolveToken()
+                .finally(() => {
+                    this._tokenPromise = null;
+                });
+        }
+        return this._tokenPromise;
+    }
+
+    async _resolveToken() {
         const root = this._tryReadCredentials();
         if (root) {
             const oauth = root.claudeAiOauth;
@@ -186,14 +204,14 @@ export class UsageClient {
         return this._settingsToken();
     }
 
-    async fetchUsage() {
+    async fetchUsage(cancellable = null) {
         const token = await this._validToken();
-        return this._request('GET', USAGE_URL, {token});
+        return this._request('GET', USAGE_URL, {token, cancellable});
     }
 
-    async fetchProfile() {
+    async fetchProfile(cancellable = null) {
         const token = await this._validToken();
-        return this._request('GET', PROFILE_URL, {token});
+        return this._request('GET', PROFILE_URL, {token, cancellable});
     }
 
     // Tier shown instantly from disk, without a network round-trip. Returns
