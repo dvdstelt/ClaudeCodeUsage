@@ -36,7 +36,9 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
 - `src/icons/` — panel and popup SVGs.
 - `build.sh` — runs `gnome-extensions pack src` into `dist/`, including `lib`,
   `icons`, and the schema; excludes dev files. Output is the uploadable
-  `dist/<uuid>.shell-extension.zip`.
+  `dist/<uuid>.shell-extension.zip`. Accepts an optional `-major`/`-minor`/
+  `-patch` flag that bumps `version-name` (semver) in `metadata.json` and
+  increments the integer `version` before packing.
 - `tools/poll.js` — standalone validator, run from the repo root:
   `gjs -m tools/poll.js`.
 

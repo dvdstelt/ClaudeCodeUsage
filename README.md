@@ -71,6 +71,19 @@ This writes `dist/claude-usage@dvdstelt.github.io.shell-extension.zip`,
 containing only the runtime files (no README, license, tools, or mockups).
 Upload it at <https://extensions.gnome.org/upload/>.
 
+To bump the version while building, pass one of `-major`, `-minor`, or
+`-patch`:
+
+```sh
+./build.sh -patch   # 0.1.5 -> 0.1.6
+./build.sh -minor   # 0.1.5 -> 0.2.0
+./build.sh -major   # 0.1.5 -> 1.0.0
+```
+
+A bump rewrites `version-name` in `src/metadata.json` and also increments the
+integer `version` field, which extensions.gnome.org requires to increase on
+every upload.
+
 ## Configuration
 
 Open the preferences from the dropdown (the gear button) or with:
