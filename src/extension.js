@@ -231,6 +231,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._openPreferences = openPreferences;
         this._client = new UsageClient(settings);
         this._busy = false;
+        this._destroyed = false;
+        this._cancellable = new Gio.Cancellable();
         this._lastUsage = null;
         this._lastFetchMs = 0;
         this._settingsIds = [];
@@ -402,15 +404,31 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._busy = true;
         this._lastFetchMs = Date.now();
 
-        Promise.all([this._client.fetchUsage(), this._client.fetchProfile()])
-            .then(([usage, profile]) => this._render(usage, profile))
-            .catch(e => this._renderError(e))
-            .finally(() => {
-                this._busy = false;
-            });
+        // Usage is required; the profile is cosmetic (name and tier pill), so a
+        // profile failure must not blank out otherwise-good usage data. Run
+        // both in parallel and only surface an error when usage itself fails.
+        Promise.allSettled([
+            this._client.fetchUsage(this._cancellable),
+            this._client.fetchProfile(this._cancellable),
+        ]).then(([usageRes, profileRes]) => {
+            if (this._destroyed)
+                return;
+            if (usageRes.status === 'rejected') {
+                this._renderError(usageRes.reason);
+                return;
+            }
+            if (profileRes.status === 'rejected')
+                logError(profileRes.reason, 'claude-usage: profile fetch failed (non-fatal)');
+            this._render(usageRes.value,
+                profileRes.status === 'fulfilled' ? profileRes.value : null);
+        }).finally(() => {
+            this._busy = false;
+        });
     }
 
     _render(usage, profile) {
+        if (this._destroyed)
+            return;
         this._error.visible = false;
         this._lastUsage = usage;
 
@@ -578,6 +596,12 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     }
 
     _renderError(e) {
+        if (this._destroyed)
+            return;
+        // A cancelled request (the extension is being torn down) is not an
+        // error worth showing; the destroyed guard above usually catches it.
+        if (e instanceof GLib.Error && e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+            return;
         // A 429 is transient (we polled a touch too soon). If we already have
         // usage on screen, keep showing it instead of flashing an error.
         if (e instanceof UsageError && e.status === 429 && this._lastUsage) {
@@ -602,6 +626,11 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._destroyed = true;
+        // Abort any in-flight fetch so its callback can't touch torn-down
+        // actors or the now-null settings object.
+        this._cancellable?.cancel();
+        this._cancellable = null;
         if (this._timer) {
             GLib.source_remove(this._timer);
             this._timer = null;
