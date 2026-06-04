@@ -475,8 +475,20 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         const xu = usage.extra_usage;
         if (xu && xu.is_enabled) {
             const cur = xu.currency || '';
+            // NOTE: the units of used_credits and monthly_limit are not
+            // confirmed against a live extra_usage payload. We scale both the
+            // same way (treating them as minor units, e.g. cents) so the two
+            // numbers are at least consistent; the previous code scaled only
+            // monthly_limit, which could not be right for both. Verify against
+            // real data and adjust the divisor if needed.
+            const money = v => Number.isFinite(v) ? `${cur} ${(v / 100).toFixed(2)}`.trim() : null;
+            const used = money(Number(xu.used_credits));
+            const limit = money(Number(xu.monthly_limit));
+            const parts = [used ?? `${cur} 0.00`.trim()];
+            if (limit && Number(xu.monthly_limit) > 0)
+                parts.push(limit);
             this._extra.visible = true;
-            this._extra.text = `Extra usage: ${cur} ${(xu.used_credits ?? 0).toFixed(2)} / ${cur} ${(xu.monthly_limit / 100).toFixed(2)}`;
+            this._extra.text = `Extra usage: ${parts.join(' / ')}`;
         } else {
             this._extra.visible = false;
         }
