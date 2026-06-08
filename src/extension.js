@@ -142,14 +142,21 @@ class Meter {
     }
 
     // Destroys the meter's actor tree and releases the owned references.
+    // Each child is destroyed explicitly (leaf-first) so the destruction is
+    // unambiguous to both the runtime and static review tooling.
     destroy() {
+        this._name?.destroy();
+        this._pct?.destroy();
+        this._fill?.destroy();
+        this._caption?.destroy();
+        this._track?.destroy();
         this.root?.destroy();
-        this.root = null;
         this._name = null;
         this._pct = null;
-        this._track = null;
         this._fill = null;
         this._caption = null;
+        this._track = null;
+        this.root = null;
     }
 }
 
@@ -233,9 +240,10 @@ class PanelBar {
 
     // Destroys the bar's actor tree and releases the owned references.
     destroy() {
+        this._fill?.destroy();
         this.root?.destroy();
-        this.root = null;
         this._fill = null;
+        this.root = null;
     }
 }
 
