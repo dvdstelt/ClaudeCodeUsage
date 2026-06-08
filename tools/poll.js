@@ -9,7 +9,7 @@ const loop = GLib.MainLoop.new(null, false);
 async function run() {
     const client = new UsageClient();
 
-    print('tier (from disk):', JSON.stringify(client.tierFromDisk()));
+    print('tier (from disk):', JSON.stringify(await client.tierFromDisk()));
 
     const profile = await client.fetchProfile();
     print('\nprofile:');
