@@ -140,6 +140,17 @@ class Meter {
         this._fill.set_width(0);
         this._caption.visible = false;
     }
+
+    // Destroys the meter's actor tree and releases the owned references.
+    destroy() {
+        this.root?.destroy();
+        this.root = null;
+        this._name = null;
+        this._pct = null;
+        this._track = null;
+        this._fill = null;
+        this._caption = null;
+    }
 }
 
 // A compact circular usage gauge for the panel, drawn with Cairo.
@@ -219,6 +230,13 @@ class PanelBar {
         this._fill.set_width(0);
         this._fill.style_class = 'cu-panel-bar-fill';
     }
+
+    // Destroys the bar's actor tree and releases the owned references.
+    destroy() {
+        this.root?.destroy();
+        this.root = null;
+        this._fill = null;
+    }
 }
 
 const ClaudeUsageIndicator = GObject.registerClass(
@@ -260,7 +278,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
         this._buildMenu();
 
-        this.menu.connect('open-state-changed', (_m, open) => {
+        this._menuOpenId = this.menu.connect('open-state-changed', (_m, open) => {
             if (open)
                 this._refresh();
         });
@@ -373,9 +391,11 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         parent.add_child(new St.Label({text: text.toUpperCase(), style_class: 'cu-section'}));
     }
 
-    _applyTierFromDisk() {
+    async _applyTierFromDisk() {
         try {
-            const {subscriptionType, rateLimitTier} = this._client.tierFromDisk();
+            const {subscriptionType, rateLimitTier} = await this._client.tierFromDisk();
+            if (this._destroyed)
+                return;
             const label = tierLabel(subscriptionType, rateLimitTier);
             this._pill.text = label;
             this._panelTier.text = label.split(' ')[0];
@@ -457,7 +477,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         }
         for (const [key, meter] of this._perModelMeters) {
             if (!seen.has(key)) {
-                meter.root.destroy();
+                meter.destroy();
                 this._perModelMeters.delete(key);
             }
         }
@@ -641,10 +661,32 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             GLib.source_remove(this._countdownTimer);
             this._countdownTimer = null;
         }
+        if (this._menuOpenId) {
+            this.menu.disconnect(this._menuOpenId);
+            this._menuOpenId = null;
+        }
         for (const id of this._settingsIds)
             this._settings.disconnect(id);
         this._settingsIds = [];
         this._settings = null;
+
+        // Tear down the gauge/meter helpers and release their references; the
+        // actors themselves also go with super.destroy(), but releasing here
+        // keeps ownership explicit.
+        this._fiveHour?.destroy();
+        this._sevenDay?.destroy();
+        for (const meter of this._perModelMeters.values())
+            meter.destroy();
+        this._perModelMeters.clear();
+        this._panelBar?.destroy();
+        this._fiveHour = null;
+        this._sevenDay = null;
+        this._panelBar = null;
+        this._ring = null;
+        this._meterBindings = [];
+        this._lastUsage = null;
+        this._client = null;
+
         super.destroy();
     }
 });

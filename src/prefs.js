@@ -42,7 +42,7 @@ function codeChallenge(verifier) {
 }
 
 export default class ClaudeUsagePreferences extends ExtensionPreferences {
-    fillPreferencesWindow(window) {
+    async fillPreferencesWindow(window) {
         const settings = this.getSettings();
 
         const page = new Adw.PreferencesPage({
@@ -130,7 +130,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         // If Claude Code is signed in, the extension rides on its credentials
         // and there's nothing for the user to do here, so the whole group is
         // omitted rather than shown disabled.
-        if (!claudeCodeCredentialsAvailable())
+        if (!(await claudeCodeCredentialsAvailable()))
             this._addAuthGroup(page, settings);
 
         this._addAboutGroup(page);

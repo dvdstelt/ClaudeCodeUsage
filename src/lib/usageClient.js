@@ -25,22 +25,37 @@ function credentialsPath() {
     return GLib.build_filenamev([GLib.get_home_dir(), '.claude', '.credentials.json']);
 }
 
+// Reads and parses Claude Code's credentials file asynchronously (shell code
+// must avoid synchronous file IO). Resolves to the parsed root object when it
+// holds an access token, or null otherwise. Never rejects: a missing file or
+// bad JSON resolves to null.
+async function readCredentialsRoot() {
+    try {
+        const file = Gio.File.new_for_path(credentialsPath());
+        const bytes = await new Promise((resolve, reject) => {
+            file.load_contents_async(null, (f, res) => {
+                try {
+                    const [ok, data] = f.load_contents_finish(res);
+                    resolve(ok ? data : null);
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+        if (!bytes)
+            return null;
+        const root = JSON.parse(decoder.decode(bytes));
+        return root?.claudeAiOauth?.accessToken ? root : null;
+    } catch {
+        return null;
+    }
+}
+
 // True when Claude Code has a usable OAuth token on disk. Used by prefs to
 // hide the in-extension sign-in UI: if Claude Code can supply a token, the
 // extension rides on it and the user never needs to log in separately.
-export function claudeCodeCredentialsAvailable() {
-    try {
-        const file = Gio.File.new_for_path(credentialsPath());
-        if (!file.query_exists(null))
-            return false;
-        const [ok, bytes] = file.load_contents(null);
-        if (!ok)
-            return false;
-        const root = JSON.parse(decoder.decode(bytes));
-        return !!root?.claudeAiOauth?.accessToken;
-    } catch {
-        return false;
-    }
+export async function claudeCodeCredentialsAvailable() {
+    return (await readCredentialsRoot()) !== null;
 }
 
 export class UsageError extends Error {
@@ -64,27 +79,24 @@ export class UsageClient {
         this._tokenPromise = null;
     }
 
-    // Reads Claude Code's credentials, or returns null when absent/unusable.
-    _tryReadCredentials() {
-        try {
-            const file = Gio.File.new_for_path(credentialsPath());
-            if (!file.query_exists(null))
-                return null;
-            const [ok, bytes] = file.load_contents(null);
-            if (!ok)
-                return null;
-            const root = JSON.parse(decoder.decode(bytes));
-            return root?.claudeAiOauth?.accessToken ? root : null;
-        } catch {
-            return null;
-        }
-    }
-
+    // Writes Claude Code's credentials back asynchronously (no synchronous file
+    // IO on the shell main loop).
     _writeCredentials(root) {
         const file = Gio.File.new_for_path(credentialsPath());
         const data = encoder.encode(JSON.stringify(root, null, 2));
-        // PRIVATE keeps the file at 0600 so the token stays owner-only.
-        file.replace_contents(data, null, false, Gio.FileCreateFlags.PRIVATE, null);
+        return new Promise((resolve, reject) => {
+            // PRIVATE keeps the file at 0600 so the token stays owner-only.
+            file.replace_contents_bytes_async(
+                new GLib.Bytes(data), null, false,
+                Gio.FileCreateFlags.PRIVATE, null, (f, res) => {
+                    try {
+                        f.replace_contents_finish(res);
+                        resolve();
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+        });
     }
 
     _request(method, url, {token, jsonBody, cancellable = null} = {}) {
@@ -144,7 +156,7 @@ export class UsageClient {
             oauth.refreshToken = data.refresh_token;
         if (data.expires_in)
             oauth.expiresAt = Date.now() + data.expires_in * 1000;
-        this._writeCredentials(root);
+        await this._writeCredentials(root);
         return oauth.accessToken;
     }
 
@@ -193,7 +205,7 @@ export class UsageClient {
     }
 
     async _resolveToken() {
-        const root = this._tryReadCredentials();
+        const root = await readCredentialsRoot();
         if (root) {
             const oauth = root.claudeAiOauth;
             const expiresAt = Number(oauth.expiresAt) || 0;
@@ -214,11 +226,11 @@ export class UsageClient {
         return this._request('GET', PROFILE_URL, {token, cancellable});
     }
 
-    // Tier shown instantly from disk, without a network round-trip. Returns
-    // nulls when Claude Code is not signed in (the in-app token path has no
-    // tier on disk; it arrives with the profile fetch instead).
-    tierFromDisk() {
-        const oauth = this._tryReadCredentials()?.claudeAiOauth;
+    // Tier shown (almost) instantly from disk, without a network round-trip.
+    // Returns nulls when Claude Code is not signed in (the in-app token path
+    // has no tier on disk; it arrives with the profile fetch instead).
+    async tierFromDisk() {
+        const oauth = (await readCredentialsRoot())?.claudeAiOauth;
         return {
             subscriptionType: oauth?.subscriptionType ?? null,
             rateLimitTier: oauth?.rateLimitTier ?? null,
