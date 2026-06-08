@@ -5,6 +5,9 @@
   "shell-version": ["48", "49", "50"],
   "url": "https://github.com/dvdstelt/ClaudeCodeUsage",
   "settings-schema": "org.gnome.shell.extensions.claude-usage",
+  "donations": {
+    "paypal": "dvdstelt"
+  },
   "version": 5,
   "version-name": "1.0.2"
 }
