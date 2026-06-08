@@ -143,7 +143,8 @@ The repository is laid out as:
   - `stylesheet.css` - panel and popup styling.
   - `lib/usageClient.js` - token resolution, refresh, and the usage/profile
     calls.
-  - `lib/versions.js` - pins the libsoup version; imported before `gi://Soup`.
+  - `lib/oauth.js` - shared OAuth/API constants and text codecs used by both
+    the usage client and prefs.
   - `schemas/` - GSettings schema. Recompile after edits with
     `glib-compile-schemas src/schemas/`.
   - `icons/` - panel and popup icons.

@@ -1,25 +1,18 @@
-import './versions.js';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
-import Soup from 'gi://Soup';
+// Pin Soup 3.0 inline: some systems still have the 2.4 typelib installed, and
+// without a version the prefs process (where the shell hasn't already loaded
+// Soup) could pick the wrong one.
+import Soup from 'gi://Soup?version=3.0';
 
-const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
-const PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
-const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
-// Public OAuth client id of the "Claude Code" application (from /api/oauth/profile).
-const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+import {
+    USAGE_URL, PROFILE_URL, TOKEN_URL, CLIENT_ID,
+    BETA_HEADER, API_VERSION, DEFAULT_EXPIRES_IN,
+    encoder, decoder,
+} from './oauth.js';
 
-const BETA_HEADER = 'oauth-2025-04-20';
-const API_VERSION = '2023-06-01';
 // Refresh when the token expires within this many milliseconds.
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
-
-const decoder = new TextDecoder();
-const encoder = new TextEncoder();
-
-// Default Claude OAuth access-token lifetime (8 hours) when the token
-// endpoint omits expires_in.
-const DEFAULT_EXPIRES_IN = 8 * 3600;
 
 function credentialsPath() {
     return GLib.build_filenamev([GLib.get_home_dir(), '.claude', '.credentials.json']);

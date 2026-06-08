@@ -257,11 +257,9 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._openPreferences = openPreferences;
         this._client = new UsageClient(settings);
         this._busy = false;
-        this._destroyed = false;
         this._cancellable = new Gio.Cancellable();
         this._lastUsage = null;
         this._lastFetchMs = 0;
-        this._settingsIds = [];
         this._perModelMeters = new Map();
         this._meterBindings = [];
         this._countdownTimer = null;
@@ -286,18 +284,25 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
         this._buildMenu();
 
-        this._menuOpenId = this.menu.connect('open-state-changed', (_m, open) => {
+        // connectObject ties these handlers to `this`, so a single
+        // disconnectObject(this) in destroy() (and the automatic cleanup when
+        // this actor is destroyed) tears them all down.
+        this.menu.connectObject('open-state-changed', (_m, open) => {
             if (open)
                 this._refresh();
-        });
+        }, this);
 
         // Live-apply preference changes without needing a shell reload.
-        for (const key of ['show-icon', 'panel-gauge', 'show-percentage', 'show-tier'])
-            this._settingsIds.push(this._settings.connect(`changed::${key}`, () => this._applyVisibility()));
-        this._settingsIds.push(this._settings.connect('changed::panel-window', () => this._renderPanel()));
-        this._settingsIds.push(this._settings.connect('changed::poll-seconds', () => this._startTimer()));
-        // Signing in (or out) from prefs changes the token source; refetch now.
-        this._settingsIds.push(this._settings.connect('changed::access-token', () => this._refresh(true)));
+        this._settings.connectObject(
+            'changed::show-icon', () => this._applyVisibility(),
+            'changed::panel-gauge', () => this._applyVisibility(),
+            'changed::show-percentage', () => this._applyVisibility(),
+            'changed::show-tier', () => this._applyVisibility(),
+            'changed::panel-window', () => this._renderPanel(),
+            'changed::poll-seconds', () => this._startTimer(),
+            // Signing in (or out) from prefs changes the token source; refetch.
+            'changed::access-token', () => this._refresh(true),
+            this);
 
         this._applyVisibility();
 
@@ -400,9 +405,10 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     }
 
     async _applyTierFromDisk() {
+        const cancellable = this._cancellable;
         try {
             const {subscriptionType, rateLimitTier} = await this._client.tierFromDisk();
-            if (this._destroyed)
+            if (cancellable.is_cancelled())
                 return;
             const label = tierLabel(subscriptionType, rateLimitTier);
             this._pill.text = label;
@@ -422,14 +428,19 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._busy = true;
         this._lastFetchMs = Date.now();
 
+        // Capture the cancellable: after teardown it is cancelled (and the
+        // instance reference nulled), which is how we know to drop a late
+        // callback instead of touching destroyed actors.
+        const cancellable = this._cancellable;
+
         // Usage is required; the profile is cosmetic (name and tier pill), so a
         // profile failure must not blank out otherwise-good usage data. Run
         // both in parallel and only surface an error when usage itself fails.
         Promise.allSettled([
-            this._client.fetchUsage(this._cancellable),
-            this._client.fetchProfile(this._cancellable),
+            this._client.fetchUsage(cancellable),
+            this._client.fetchProfile(cancellable),
         ]).then(([usageRes, profileRes]) => {
-            if (this._destroyed)
+            if (cancellable.is_cancelled())
                 return;
             if (usageRes.status === 'rejected') {
                 this._renderError(usageRes.reason);
@@ -445,8 +456,6 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     }
 
     _render(usage, profile) {
-        if (this._destroyed)
-            return;
         this._error.visible = false;
         this._lastUsage = usage;
 
@@ -626,10 +635,9 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     }
 
     _renderError(e) {
-        if (this._destroyed)
-            return;
-        // A cancelled request (the extension is being torn down) is not an
-        // error worth showing; the destroyed guard above usually catches it.
+        // A cancelled request means the extension is being torn down; nothing
+        // to show. (Callers already drop cancelled results, so this is belt
+        // and braces.)
         if (e instanceof GLib.Error && e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
             return;
         // A 429 is transient (we polled a touch too soon). If we already have
@@ -656,9 +664,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     }
 
     destroy() {
-        this._destroyed = true;
-        // Abort any in-flight fetch so its callback can't touch torn-down
-        // actors or the now-null settings object.
+        // Abort any in-flight fetch so its callback drops out (it checks the
+        // cancellable) instead of touching torn-down actors.
         this._cancellable?.cancel();
         this._cancellable = null;
         if (this._timer) {
@@ -669,13 +676,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             GLib.source_remove(this._countdownTimer);
             this._countdownTimer = null;
         }
-        if (this._menuOpenId) {
-            this.menu.disconnect(this._menuOpenId);
-            this._menuOpenId = null;
-        }
-        for (const id of this._settingsIds)
-            this._settings.disconnect(id);
-        this._settingsIds = [];
+        this.menu.disconnectObject(this);
+        this._settings.disconnectObject(this);
         this._settings = null;
 
         // Tear down the gauge/meter helpers and release their references; the
