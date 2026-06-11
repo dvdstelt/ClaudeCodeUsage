@@ -69,6 +69,40 @@ function projectedUtil(util, resetsAtIso, totalSeconds) {
     return Math.max(util, (util * totalSeconds) / elapsed);
 }
 
+// Seconds from now until utilization would hit 100% at the average rate so far
+// this window, but only when that exhaustion lands before the window resets
+// (i.e. the current pace really does overrun the limit). Returns null
+// otherwise, using the same early-window guard as projectedUtil so we don't
+// extrapolate from noise.
+function exhaustSeconds(util, resetsAtIso, totalSeconds) {
+    const target = Date.parse(resetsAtIso ?? '');
+    if (Number.isNaN(target) || !totalSeconds || util <= 0)
+        return null;
+    const remaining = (target - Date.now()) / 1000;
+    if (remaining <= 0)
+        return null;
+    const elapsed = totalSeconds - remaining;
+    if (elapsed <= 0 || elapsed / totalSeconds < 0.05)
+        return null;
+    const toExhaust = (elapsed * (100 - util)) / util;
+    return toExhaust > 0 && toExhaust < remaining ? toExhaust : null;
+}
+
+// Human-friendly duration: "30s", "45m", "4h 21m", "2d 5h".
+function humanDuration(seconds) {
+    const s = Math.max(0, Math.floor(seconds));
+    if (s < 60)
+        return `${s}s`;
+    const mins = Math.round(s / 60);
+    if (mins < 60)
+        return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24)
+        return `${hrs}h ${mins % 60}m`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ${hrs % 24}h`;
+}
+
 function tierLabel(subscriptionType, rateLimitTier) {
     const base = subscriptionType === 'max' ? 'MAX'
         : subscriptionType === 'pro' ? 'PRO'
@@ -578,8 +612,11 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._renderPanel();
     }
 
-    // Renders a meter from a usage window, coloring by projected utilization
-    // and appending a "proj N%" note to the caption when it trends past safe.
+    // Renders a meter from a usage window, coloring by projected utilization.
+    // When the current pace would exhaust the window before it resets, the
+    // caption spells out the burn instead of showing a bare "proj N%": it says
+    // how long you have left at this rate. A slower-but-still-rising window
+    // gets a gentler "on track for N%" note.
     _applyWindow(meter, win, totalSeconds) {
         if (!win) {
             meter.setMuted();
@@ -589,10 +626,16 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         const proj = projectedUtil(util, win.resets_at, totalSeconds);
         let caption = win.resets_at ? relativeReset(win.resets_at)
             : (util > 0 ? '' : 'not used yet');
-        if (severity(proj) !== 'cu-ok' && Math.round(proj) > Math.round(util)) {
-            const note = `proj ${Math.round(proj)}%`;
+
+        const exhaust = exhaustSeconds(util, win.resets_at, totalSeconds);
+        let note = '';
+        if (exhaust !== null)
+            note = `burning fast — out in ~${humanDuration(exhaust)} at this rate`;
+        else if (severity(proj) !== 'cu-ok' && Math.round(proj) > Math.round(util))
+            note = `on track for ~${Math.round(proj)}% by reset`;
+        if (note)
             caption = caption ? `${caption} · ${note}` : note;
-        }
+
         meter.setValue(util, caption, proj);
     }
 
