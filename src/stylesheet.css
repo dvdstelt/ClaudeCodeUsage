@@ -30,6 +30,11 @@
 }
 .cu-panel-pct.cu-warn { color: #ffa348; }
 .cu-panel-pct.cu-crit { color: #ff6b6b; }
+.cu-panel-reset {
+    font-size: 9pt;
+    color: rgba(128, 128, 128, 1.0);
+    font-feature-settings: "tnum";
+}
 .cu-panel-tier {
     font-size: 9pt;
     color: rgba(128, 128, 128, 1.0);

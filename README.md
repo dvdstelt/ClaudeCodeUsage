@@ -11,8 +11,9 @@ the extension can sign in on its own from the preferences window.
 ## Features
 
 - **Panel indicator** with a Claude icon, a usage gauge (a circular ring or a
-  horizontal bar, your choice, or none), a percentage, and a subscription tier
-  label. Each element can be toggled independently.
+  horizontal bar, your choice, or none), a percentage, an optional time-until-
+  reset countdown, and a subscription tier label. Each element can be toggled
+  independently.
 - **Dropdown** with per-window meters: the 5-hour window, the 7-day window, and
   any per-model 7-day windows the API reports (for example Opus and Sonnet),
   discovered automatically.
@@ -92,10 +93,11 @@ Open the preferences from the dropdown (the gear button) or with:
 gnome-extensions prefs claude-usage@dvdstelt.github.io
 ```
 
-- **Panel elements** - show or hide the icon, percentage, and tier, and choose
-  the usage gauge (circle, bar, or none).
-- **Panel reflects** - which window the ring and percentage track: the 5-hour
-  window, the 7-day window, or whichever is most constrained.
+- **Panel elements** - show or hide the icon, percentage, time until reset, and
+  tier, and choose the usage gauge (circle, bar, or none).
+- **Panel reflects** - which window the ring, percentage, and time-until-reset
+  countdown track: the 5-hour window, the 7-day window, or whichever is most
+  constrained.
 - **Refresh interval** - how often to poll for updated usage (30 to 600
   seconds; default 300).
 

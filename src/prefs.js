@@ -63,6 +63,14 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
             settings.bind(key, row, 'active', Gio.SettingsBindFlags.DEFAULT);
         }
 
+        // Time-until-reset for the window chosen by "Panel reflects" below.
+        const resetRow = new Adw.SwitchRow({
+            title: 'Time until reset',
+            subtitle: 'Show the time left before the window selected under "Panel reflects" resets.',
+        });
+        elements.add(resetRow);
+        settings.bind('show-reset', resetRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+
         const gauges = new Gtk.StringList();
         gauges.append('Circle');
         gauges.append('Bar');
