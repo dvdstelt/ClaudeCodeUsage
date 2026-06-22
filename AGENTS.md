@@ -28,12 +28,14 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   on-disk credentials first, the extension's own GSettings tokens second),
   calls the usage and profile endpoints, refreshes the token when near expiry,
   and writes it back to whichever store it came from. Exports
-  `claudeCodeCredentialsAvailable()` for prefs.
-- `src/lib/versions.js` — pins `Soup` to 3.0; must be imported before
-  `gi://Soup` (ESM evaluates imported modules in source order, so the version is
-  set before the typelib loads).
+  `claudeCodeCredentialsAvailable()` for prefs. Soup is pinned inline via
+  `gi://Soup?version=3.0` (some systems still ship the 2.4 typelib).
+- `src/lib/oauth.js` — shared OAuth/API constants (client id, endpoints,
+  scopes, headers) and text codecs, imported by both `usageClient.js` and
+  `prefs.js` so the values are defined once. No shell imports.
 - `src/stylesheet.css` — `cu-*` classes for the indicator and popup.
-- `src/icons/` — panel and popup SVGs.
+- `src/icons/` — panel icon (`claude-spark.svg`) and popup logo
+  (`octopus.png`).
 - `build.sh` — runs `gnome-extensions pack src` into `dist/`, including `lib`,
   `icons`, and the schema; excludes dev files. Output is the uploadable
   `dist/<uuid>.shell-extension.zip`. Accepts an optional `-major`/`-minor`/

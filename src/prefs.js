@@ -2,21 +2,15 @@ import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import Soup from 'gi://Soup';
+import Soup from 'gi://Soup?version=3.0';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {claudeCodeCredentialsAvailable} from './lib/usageClient.js';
-
-const AUTHORIZE_URL = 'https://claude.ai/oauth/authorize';
-const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
-const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-const REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
-const OAUTH_SCOPES = 'user:profile user:inference';
-const DEFAULT_EXPIRES_IN = 8 * 3600;
-
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+import {
+    AUTHORIZE_URL, TOKEN_URL, CLIENT_ID, REDIRECT_URI, OAUTH_SCOPES,
+    DEFAULT_EXPIRES_IN, encoder, decoder,
+} from './lib/oauth.js';
 
 // URL-safe base64 without padding, as required by PKCE.
 function base64url(bytes) {
