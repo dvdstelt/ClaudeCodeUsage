@@ -13,12 +13,13 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
 
 - `src/extension.js` — panel indicator + dropdown UI (ESM, GNOME Shell 45+
   style). The panel shows a Claude icon, a Cairo-drawn usage ring, a percentage,
-  and a tier label; each is independently toggleable via GSettings.
+  an optional time-until-reset countdown, and a tier label; each is
+  independently toggleable via GSettings.
 - `src/prefs.js` — Adwaita preferences (element toggles, panel window, refresh
   interval), bound to GSettings. Also hosts the fallback PKCE sign-in flow,
   shown only when `claudeCodeCredentialsAvailable()` is false.
 - `src/schemas/` — GSettings schema (`org.gnome.shell.extensions.claude-usage`).
-  Keys: `show-icon`/`show-percentage`/`show-tier` (bool),
+  Keys: `show-icon`/`show-percentage`/`show-tier`/`show-reset` (bool),
   `panel-gauge` (`ring`|`bar`|`none`),
   `panel-window` (`five-hour`|`seven-day`|`max`), `poll-seconds` (30-600),
   and the in-app sign-in tokens `access-token`/`refresh-token` (string) +

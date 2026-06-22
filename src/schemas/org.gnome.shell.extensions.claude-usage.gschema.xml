@@ -27,6 +27,11 @@
       <summary>Show the subscription tier</summary>
       <description>Display the subscription tier label in the panel.</description>
     </key>
+    <key name="show-reset" type="b">
+      <default>false</default>
+      <summary>Show the time until reset</summary>
+      <description>Display, in the panel, the time left before the window selected by panel-window resets.</description>
+    </key>
     <key name="panel-window" type="s">
       <choices>
         <choice value="five-hour"/>

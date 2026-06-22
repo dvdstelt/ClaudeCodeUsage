@@ -88,8 +88,10 @@ function exhaustSeconds(util, resetsAtIso, totalSeconds) {
     return toExhaust > 0 && toExhaust < remaining ? toExhaust : null;
 }
 
-// Human-friendly duration: "30s", "45m", "4h 21m", "2d 5h".
-function humanDuration(seconds) {
+// Human-friendly duration trimmed to the two largest units: "30s", "45m",
+// "4h 21m", "2d 5h". sep sets what goes between the two units, e.g. '' for the
+// compact panel form ("4h21m").
+function humanDuration(seconds, sep = ' ') {
     const s = Math.max(0, Math.floor(seconds));
     if (s < 60)
         return `${s}s`;
@@ -98,9 +100,9 @@ function humanDuration(seconds) {
         return `${mins}m`;
     const hrs = Math.floor(mins / 60);
     if (hrs < 24)
-        return `${hrs}h ${mins % 60}m`;
+        return `${hrs}h${sep}${mins % 60}m`;
     const days = Math.floor(hrs / 24);
-    return `${days}d ${hrs % 24}h`;
+    return `${days}d${sep}${hrs % 24}h`;
 }
 
 function tierLabel(subscriptionType, rateLimitTier) {
@@ -135,6 +137,19 @@ function relativeReset(iso) {
         return `resets in ${hrs}h ${mins % 60}m`;
     const days = Math.floor(hrs / 24);
     return `resets in ${days}d ${hrs % 24}h`;
+}
+
+// Compact "time until reset" for the panel: magnitude only, no "resets in"
+// prefix, no separator between units ("4h21m"). Empty when the timestamp is
+// missing or unparseable so the label collapses instead of showing junk.
+function compactReset(iso) {
+    const target = Date.parse(iso);
+    if (Number.isNaN(target))
+        return '';
+    const diff = target - Date.now();
+    if (diff <= 0)
+        return 'now';
+    return humanDuration(diff / 1000, '');
 }
 
 // A labelled progress meter: title + percentage row, bar, and reset caption.
@@ -308,11 +323,13 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._ring = new Ring();
         this._panelBar = new PanelBar();
         this._panelPct = new St.Label({text: '…', style_class: 'cu-panel-pct', y_align: Clutter.ActorAlign.CENTER});
+        this._panelReset = new St.Label({text: '', style_class: 'cu-panel-reset', y_align: Clutter.ActorAlign.CENTER});
         this._panelTier = new St.Label({text: '', style_class: 'cu-panel-tier', y_align: Clutter.ActorAlign.CENTER});
         box.add_child(this._panelIcon);
         box.add_child(this._ring);
         box.add_child(this._panelBar.root);
         box.add_child(this._panelPct);
+        box.add_child(this._panelReset);
         box.add_child(this._panelTier);
         this.add_child(box);
 
@@ -332,6 +349,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             'changed::panel-gauge', () => this._applyVisibility(),
             'changed::show-percentage', () => this._applyVisibility(),
             'changed::show-tier', () => this._applyVisibility(),
+            'changed::show-reset', () => this._applyVisibility(),
             'changed::panel-window', () => this._renderPanel(),
             'changed::poll-seconds', () => this._startTimer(),
             // Signing in (or out) from prefs changes the token source; refetch.
@@ -365,6 +383,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._panelBar.root.visible = gauge === 'bar';
         this._panelPct.visible = this._settings.get_boolean('show-percentage');
         this._panelTier.visible = this._settings.get_boolean('show-tier');
+        this._panelReset.visible = this._settings.get_boolean('show-reset');
     }
 
     _buildMenu() {
@@ -667,12 +686,14 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             this._panelPct.style_class = 'cu-panel-pct';
             this._ring.setUnknown();
             this._panelBar.setUnknown();
+            this._panelReset.text = '';
             return;
         }
         const util = sel.win.utilization;
         const proj = projectedUtil(util, sel.win.resets_at, sel.total);
         this._panelPct.text = `${Math.round(util)}%`;
         this._panelPct.style_class = `cu-panel-pct ${severity(proj)}`;
+        this._panelReset.text = sel.win.resets_at ? compactReset(sel.win.resets_at) : '';
         this._ring.setValue(util, proj);
         this._panelBar.setValue(util, proj);
     }
@@ -693,6 +714,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._panelPct.style_class = 'cu-panel-pct cu-warn';
         this._ring.setUnknown();
         this._panelBar.setUnknown();
+        this._panelReset.text = '';
         let msg;
         if (e instanceof UsageError && e.status === 401)
             msg = 'Session expired. Open Claude Code to sign in again.';
@@ -736,6 +758,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._sevenDay = null;
         this._panelBar = null;
         this._ring = null;
+        this._panelReset = null;
         this._meterBindings = [];
         this._lastUsage = null;
         this._client = null;
