@@ -88,8 +88,10 @@ function exhaustSeconds(util, resetsAtIso, totalSeconds) {
     return toExhaust > 0 && toExhaust < remaining ? toExhaust : null;
 }
 
-// Human-friendly duration: "30s", "45m", "4h 21m", "2d 5h".
-function humanDuration(seconds) {
+// Human-friendly duration trimmed to the two largest units: "30s", "45m",
+// "4h 21m", "2d 5h". sep sets what goes between the two units, e.g. '' for the
+// compact panel form ("4h21m").
+function humanDuration(seconds, sep = ' ') {
     const s = Math.max(0, Math.floor(seconds));
     if (s < 60)
         return `${s}s`;
@@ -98,9 +100,9 @@ function humanDuration(seconds) {
         return `${mins}m`;
     const hrs = Math.floor(mins / 60);
     if (hrs < 24)
-        return `${hrs}h ${mins % 60}m`;
+        return `${hrs}h${sep}${mins % 60}m`;
     const days = Math.floor(hrs / 24);
-    return `${days}d ${hrs % 24}h`;
+    return `${days}d${sep}${hrs % 24}h`;
 }
 
 function tierLabel(subscriptionType, rateLimitTier) {
@@ -138,7 +140,7 @@ function relativeReset(iso) {
 }
 
 // Compact "time until reset" for the panel: magnitude only, no "resets in"
-// prefix, trimmed to the two largest units. Empty when the timestamp is
+// prefix, no separator between units ("4h21m"). Empty when the timestamp is
 // missing or unparseable so the label collapses instead of showing junk.
 function compactReset(iso) {
     const target = Date.parse(iso);
@@ -147,16 +149,7 @@ function compactReset(iso) {
     const diff = target - Date.now();
     if (diff <= 0)
         return 'now';
-    if (diff < 60000)
-        return `${Math.floor(diff / 1000)}s`;
-    const mins = Math.round(diff / 60000);
-    if (mins < 60)
-        return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24)
-        return `${hrs}h${mins % 60}m`;
-    const days = Math.floor(hrs / 24);
-    return `${days}d${hrs % 24}h`;
+    return humanDuration(diff / 1000, '');
 }
 
 // A labelled progress meter: title + percentage row, bar, and reset caption.
@@ -721,6 +714,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._panelPct.style_class = 'cu-panel-pct cu-warn';
         this._ring.setUnknown();
         this._panelBar.setUnknown();
+        this._panelReset.text = '';
         let msg;
         if (e instanceof UsageError && e.status === 401)
             msg = 'Session expired. Open Claude Code to sign in again.';
@@ -764,6 +758,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._sevenDay = null;
         this._panelBar = null;
         this._ring = null;
+        this._panelReset = null;
         this._meterBindings = [];
         this._lastUsage = null;
         this._client = null;
