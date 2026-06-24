@@ -128,13 +128,26 @@ export class UsageClient {
 
     // Trades a refresh token for a fresh token set at the OAuth token endpoint.
     async _exchangeRefreshToken(refreshToken) {
-        const data = await this._request('POST', TOKEN_URL, {
-            jsonBody: {
-                grant_type: 'refresh_token',
-                refresh_token: refreshToken,
-                client_id: CLIENT_ID,
-            },
-        });
+        let data;
+        try {
+            data = await this._request('POST', TOKEN_URL, {
+                jsonBody: {
+                    grant_type: 'refresh_token',
+                    refresh_token: refreshToken,
+                    client_id: CLIENT_ID,
+                },
+            });
+        } catch (e) {
+            // A 400/401 from the token endpoint means the refresh token itself
+            // is expired or revoked (e.g. invalid_grant), not a transient
+            // network error. Surface it as a session-expired (401) condition so
+            // the UI tells the user to sign in again instead of showing a bare
+            // "HTTP 400".
+            if (e instanceof UsageError && (e.status === 400 || e.status === 401))
+                throw new UsageError('Session expired; sign in to Claude Code again',
+                    {status: 401, body: e.body});
+            throw e;
+        }
         if (!data.access_token)
             throw new UsageError('Refresh response missing access_token', {body: JSON.stringify(data)});
         return data;
