@@ -44,11 +44,21 @@ async function readCredentialsRoot() {
     }
 }
 
-// True when Claude Code has a usable OAuth token on disk. Used by prefs to
+// True when Claude Code has a *usable* OAuth token on disk. Used by prefs to
 // hide the in-extension sign-in UI: if Claude Code can supply a token, the
 // extension rides on it and the user never needs to log in separately.
+//
+// An expired access token counts as unavailable: we can't tell without a
+// network call whether the refresh token still works (it may have expired too,
+// e.g. for someone who only uses Claude Desktop), so we surface the in-app
+// sign-in as a fallback. An active CLI user keeps a non-expired access token,
+// so the sign-in stays hidden for them.
 export async function claudeCodeCredentialsAvailable() {
-    return (await readCredentialsRoot()) !== null;
+    const root = await readCredentialsRoot();
+    if (!root)
+        return false;
+    const expiresAt = Number(root.claudeAiOauth.expiresAt) || 0;
+    return !expiresAt || expiresAt > Date.now();
 }
 
 export class UsageError extends Error {
@@ -128,13 +138,26 @@ export class UsageClient {
 
     // Trades a refresh token for a fresh token set at the OAuth token endpoint.
     async _exchangeRefreshToken(refreshToken) {
-        const data = await this._request('POST', TOKEN_URL, {
-            jsonBody: {
-                grant_type: 'refresh_token',
-                refresh_token: refreshToken,
-                client_id: CLIENT_ID,
-            },
-        });
+        let data;
+        try {
+            data = await this._request('POST', TOKEN_URL, {
+                jsonBody: {
+                    grant_type: 'refresh_token',
+                    refresh_token: refreshToken,
+                    client_id: CLIENT_ID,
+                },
+            });
+        } catch (e) {
+            // A 400/401 from the token endpoint means the refresh token itself
+            // is expired or revoked (e.g. invalid_grant), not a transient
+            // network error. Surface it as a session-expired (401) condition so
+            // the UI tells the user to sign in again instead of showing a bare
+            // "HTTP 400".
+            if (e instanceof UsageError && (e.status === 400 || e.status === 401))
+                throw new UsageError('Session expired; sign in to Claude Code again',
+                    {status: 401, body: e.body});
+            throw e;
+        }
         if (!data.access_token)
             throw new UsageError('Refresh response missing access_token', {body: JSON.stringify(data)});
         return data;
@@ -204,7 +227,17 @@ export class UsageClient {
             const expiresAt = Number(oauth.expiresAt) || 0;
             if (expiresAt && expiresAt - Date.now() > REFRESH_SKEW_MS)
                 return oauth.accessToken;
-            return this._refreshFileToken(root);
+            try {
+                return await this._refreshFileToken(root);
+            } catch (e) {
+                // Claude Code's credentials are dead (e.g. its refresh token
+                // expired, which happens when the CLI is unused and only Claude
+                // Desktop is signed in). Fall back to the extension's own in-app
+                // token if the user has signed in; otherwise surface the error.
+                if (this._settings?.get_string('access-token'))
+                    return this._settingsToken();
+                throw e;
+            }
         }
         return this._settingsToken();
     }
