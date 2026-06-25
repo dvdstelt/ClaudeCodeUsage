@@ -5,8 +5,12 @@ usage limits right in the top bar, so you can see how much of your 5-hour and
 7-day windows you have left without opening a browser.
 
 It reuses the OAuth token that Claude Code already stores on disk, so for most
-people there is nothing to log in to. If you do not have Claude Code installed,
-the extension can sign in on its own from the preferences window.
+people there is nothing to log in to. If you do not use Claude Code (or its
+saved sign-in has expired), the extension can sign in on its own from the
+preferences window.
+
+> **What changed?** See the [changelog](CHANGELOG.md) for the notable changes in
+> each release.
 
 ## Features
 
@@ -19,8 +23,10 @@ the extension can sign in on its own from the preferences window.
   discovered automatically.
 - **Rate projection.** Meters, the ring, and the panel percentage are colored by
   your projected end-of-window usage at the current burn rate, so a fast burn
-  turns amber or red before you actually hit the limit. A `proj N%` note is
-  added to the caption when usage is trending past safe.
+  turns amber or red before you actually hit the limit. When a window is on
+  track to run out early, the caption spells it out (for example
+  `burning fast — out in ~1h20m at this rate`); a window that is merely rising
+  shows `on track for ~N% by reset`.
 - **Live countdown.** The "resets in" captions tick down between polls, counting
   in seconds once a window is less than a minute from resetting.
 - **Theme aware.** The ring track follows your panel text color, so it stays
@@ -76,9 +82,9 @@ To bump the version while building, pass one of `-major`, `-minor`, or
 `-patch`:
 
 ```sh
-./build.sh -patch   # 0.1.5 -> 0.1.6
-./build.sh -minor   # 0.1.5 -> 0.2.0
-./build.sh -major   # 0.1.5 -> 1.0.0
+./build.sh -patch   # 1.1.1 -> 1.1.2
+./build.sh -minor   # 1.1.1 -> 1.2.0
+./build.sh -major   # 1.1.1 -> 2.0.0
 ```
 
 A bump rewrites `version-name` in `src/metadata.json` and also increments the
@@ -111,15 +117,17 @@ ways:
    expiry it is refreshed automatically with the stored refresh token and
    written back to the same file, so it stays valid whether or not Claude Code
    itself is running. Because the credentials are shared, you stay signed in to
-   both.
+   both. If those credentials have fully expired (for example you only use
+   Claude Desktop and never sign in to the Claude Code CLI), the extension
+   falls back to the in-app sign-in below.
 
-2. **In-app sign-in (fallback).** If Claude Code is not signed in, the
+2. **In-app sign-in (fallback).** When Claude Code has no valid token, the
    preferences window shows an **Account** group with a Connect button. It runs
    a standard PKCE OAuth flow: Connect opens your browser, you authorize, and
    paste the resulting code back into the preferences window. The tokens are
    stored in GSettings and refreshed automatically before they expire. This
-   group is hidden whenever Claude Code credentials are present, since there is
-   nothing to do in that case.
+   group is hidden whenever Claude Code has a valid token, since there is
+   nothing to do in that case; it reappears once that token expires.
 
 ## How it works
 
