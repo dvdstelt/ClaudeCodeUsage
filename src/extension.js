@@ -717,7 +717,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._panelReset.text = '';
         let msg;
         if (e instanceof UsageError && e.status === 401)
-            msg = 'Session expired. Open Settings to sign in again (Claude Code or in-app).';
+            msg = 'Session expired. Sign in via Claude Code or Settings.';
         else if (e instanceof UsageError && e.status === 429)
             msg = 'Rate limited by Claude; will retry shortly.';
         else
