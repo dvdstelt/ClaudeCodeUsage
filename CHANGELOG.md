@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+- Gauge colors now reflect the *consequence* of a fast burn, not just the
+  projected percentage. A window only turns red when you're out of headroom now
+  or would be locked out for a meaningful stretch; a burn that only just runs
+  out right before the reset stays amber. The caption matches (e.g. "on pace to
+  run out just before reset" instead of "burning fast").
+
 ## 1.1.1 - 2026-06-25
 
 ### Changed

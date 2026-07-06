@@ -15,20 +15,33 @@ import {UsageClient, UsageError} from './lib/usageClient.js';
 const TRACK_WIDTH = 300;
 const USAGE_SETTINGS_URL = 'https://claude.ai/settings/usage';
 
-// Threshold -> style class suffix for bar/number coloring.
-function severity(util) {
+// Severity levels, least to most severe.
+const LEVEL_RANK = {ok: 0, warn: 1, crit: 2};
+
+// Severity from a raw utilization %: how full the bucket is right now.
+function utilLevel(util) {
     if (util >= 90)
-        return 'cu-crit';
+        return 'crit';
     if (util >= 75)
-        return 'cu-warn';
-    return 'cu-ok';
+        return 'warn';
+    return 'ok';
 }
 
-// Same thresholds as severity(), but as RGB triples for Cairo painting.
-function severityRgb(util) {
-    if (util >= 90)
+// The more severe of two levels.
+function maxLevel(a, b) {
+    return LEVEL_RANK[a] >= LEVEL_RANK[b] ? a : b;
+}
+
+// Style-class suffix for a level (cu-ok / cu-warn / cu-crit).
+function levelClass(level) {
+    return `cu-${level}`;
+}
+
+// RGB triple for a level, for Cairo painting.
+function levelRgb(level) {
+    if (level === 'crit')
         return [0.88, 0.11, 0.14]; // #e01b24
-    if (util >= 75)
+    if (level === 'warn')
         return [1.0, 0.47, 0.0];   // #ff7800
     return [0.2, 0.82, 0.48];      // #33d17a
 }
@@ -105,6 +118,61 @@ function humanDuration(seconds, sep = ' ') {
     return `${days}d${sep}${hrs % 24}h`;
 }
 
+// Being locked out for at least this fraction of the window makes a fast burn
+// "critical" (red). A shorter lockout (running out just before the reset) only
+// warrants a warning (amber).
+const LOCKOUT_CRIT_FRAC = 0.10;
+
+// How long you'd be stuck at the limit before the window resets, in seconds, at
+// the current burn rate, or null when the pace doesn't run out before reset.
+function lockoutSeconds(util, resetsAtIso, totalSeconds) {
+    const exhaust = exhaustSeconds(util, resetsAtIso, totalSeconds);
+    if (exhaust === null)
+        return null;
+    const remaining = (Date.parse(resetsAtIso) - Date.now()) / 1000;
+    return Math.max(0, remaining - exhaust);
+}
+
+// Severity for a usage window, based on the *consequence* of the current burn
+// rather than the raw projected percentage. Red is reserved for "out of
+// headroom now, or locked out for a meaningful stretch"; a burn that only just
+// overruns right before the reset stays amber.
+function windowLevel(util, resetsAtIso, totalSeconds) {
+    // Floor: how full the bucket is right now, independent of timing.
+    let level = utilLevel(util);
+
+    const lockout = lockoutSeconds(util, resetsAtIso, totalSeconds);
+    if (lockout !== null) {
+        // Projected to run out before the reset: escalate by how long you'd be
+        // locked out, as a fraction of the whole window.
+        const projLevel = lockout >= totalSeconds * LOCKOUT_CRIT_FRAC ? 'crit' : 'warn';
+        level = maxLevel(level, projLevel);
+    } else {
+        // Won't run out before the reset: a rising window can warn, but never
+        // go critical from projection alone.
+        if (projectedUtil(util, resetsAtIso, totalSeconds) >= 75)
+            level = maxLevel(level, 'warn');
+    }
+    return level;
+}
+
+// Caption note explaining the projection, tied to the same lockout threshold as
+// windowLevel so an amber gauge never reads "burning fast".
+function projectionNote(util, resetsAtIso, totalSeconds) {
+    const lockout = lockoutSeconds(util, resetsAtIso, totalSeconds);
+    if (lockout !== null) {
+        if (lockout >= totalSeconds * LOCKOUT_CRIT_FRAC) {
+            const exhaust = exhaustSeconds(util, resetsAtIso, totalSeconds);
+            return `burning fast — out in ~${humanDuration(exhaust)} at this rate`;
+        }
+        return 'on pace to run out just before reset';
+    }
+    const proj = projectedUtil(util, resetsAtIso, totalSeconds);
+    if (proj >= 75 && Math.round(proj) > Math.round(util))
+        return `on track for ~${Math.round(proj)}% by reset`;
+    return '';
+}
+
 function tierLabel(subscriptionType, rateLimitTier) {
     const base = subscriptionType === 'max' ? 'MAX'
         : subscriptionType === 'pro' ? 'PRO'
@@ -174,12 +242,12 @@ class Meter {
         this.root.add_child(this._caption);
     }
 
-    // The bar width tracks actual utilization; colorUtil (defaults to util)
-    // drives the severity color, so projection can tint without resizing.
-    setValue(util, caption, colorUtil = util) {
+    // The bar width tracks actual utilization; level (defaults to the util's
+    // own level) drives the color, so projection can tint without resizing.
+    setValue(util, caption, level = utilLevel(util)) {
         this._pct.text = `${Math.round(util)}%`;
         this._fill.set_width(Math.round((Math.max(0, Math.min(100, util)) / 100) * TRACK_WIDTH));
-        this._fill.style_class = `cu-fill ${severity(colorUtil)}`;
+        this._fill.style_class = `cu-fill ${levelClass(level)}`;
         this._caption.text = caption ?? '';
         this._caption.visible = !!caption;
     }
@@ -223,9 +291,9 @@ class Ring extends St.DrawingArea {
         this._color = null;
     }
 
-    setValue(util, colorUtil = util) {
+    setValue(util, level = utilLevel(util)) {
         this._util = Math.max(0, Math.min(100, util));
-        this._color = severityRgb(colorUtil);
+        this._color = levelRgb(level);
         this.queue_repaint();
     }
 
@@ -254,7 +322,7 @@ class Ring extends St.DrawingArea {
         cr.stroke();
 
         if (this._util !== null && this._util > 0) {
-            const [r, g, b] = this._color ?? severityRgb(this._util);
+            const [r, g, b] = this._color ?? levelRgb(utilLevel(this._util));
             cr.setSourceRGBA(r, g, b, 1);
             cr.arc(cx, cy, radius, start, start + (this._util / 100) * 2 * Math.PI);
             cr.stroke();
@@ -276,10 +344,10 @@ class PanelBar {
         this.root.add_child(this._fill);
     }
 
-    setValue(util, colorUtil = util) {
+    setValue(util, level = utilLevel(util)) {
         const clamped = Math.max(0, Math.min(100, util));
         this._fill.set_width(Math.round((clamped / 100) * PANEL_BAR_WIDTH));
-        this._fill.style_class = `cu-panel-bar-fill ${severity(colorUtil)}`;
+        this._fill.style_class = `cu-panel-bar-fill ${levelClass(level)}`;
     }
 
     setUnknown() {
@@ -631,31 +699,25 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._renderPanel();
     }
 
-    // Renders a meter from a usage window, coloring by projected utilization.
-    // When the current pace would exhaust the window before it resets, the
-    // caption spells out the burn instead of showing a bare "proj N%": it says
-    // how long you have left at this rate. A slower-but-still-rising window
-    // gets a gentler "on track for N%" note.
+    // Renders a meter from a usage window. The color reflects the consequence
+    // of the current burn (see windowLevel): red only when you're out of
+    // headroom now or would be locked out for a meaningful stretch; amber for a
+    // near-reset overrun or a rising trend. The caption explains it in words.
     _applyWindow(meter, win, totalSeconds) {
         if (!win) {
             meter.setMuted();
             return;
         }
         const util = win.utilization;
-        const proj = projectedUtil(util, win.resets_at, totalSeconds);
+        const level = windowLevel(util, win.resets_at, totalSeconds);
         let caption = win.resets_at ? relativeReset(win.resets_at)
             : (util > 0 ? '' : 'not used yet');
 
-        const exhaust = exhaustSeconds(util, win.resets_at, totalSeconds);
-        let note = '';
-        if (exhaust !== null)
-            note = `burning fast — out in ~${humanDuration(exhaust)} at this rate`;
-        else if (severity(proj) !== 'cu-ok' && Math.round(proj) > Math.round(util))
-            note = `on track for ~${Math.round(proj)}% by reset`;
+        const note = projectionNote(util, win.resets_at, totalSeconds);
         if (note)
             caption = caption ? `${caption} · ${note}` : note;
 
-        meter.setValue(util, caption, proj);
+        meter.setValue(util, caption, level);
     }
 
     // Which usage window the panel reflects, per the panel-window preference.
@@ -690,12 +752,12 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             return;
         }
         const util = sel.win.utilization;
-        const proj = projectedUtil(util, sel.win.resets_at, sel.total);
+        const level = windowLevel(util, sel.win.resets_at, sel.total);
         this._panelPct.text = `${Math.round(util)}%`;
-        this._panelPct.style_class = `cu-panel-pct ${severity(proj)}`;
+        this._panelPct.style_class = `cu-panel-pct ${levelClass(level)}`;
         this._panelReset.text = sel.win.resets_at ? compactReset(sel.win.resets_at) : '';
-        this._ring.setValue(util, proj);
-        this._panelBar.setValue(util, proj);
+        this._ring.setValue(util, level);
+        this._panelBar.setValue(util, level);
     }
 
     _renderError(e) {
