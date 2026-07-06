@@ -3,6 +3,7 @@ import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import Pango from 'gi://Pango';
 import Cairo from 'cairo';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -220,6 +221,17 @@ function compactReset(iso) {
     return humanDuration(diff / 1000, '');
 }
 
+// Let a fixed-width popup label wrap onto extra lines instead of running off
+// the edge. Pango only wraps when the text actually exceeds the width, so short
+// text stays on one line. Returns the label for chaining.
+function wrapLabel(label) {
+    label.x_expand = true;
+    label.clutter_text.line_wrap = true;
+    label.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+    label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    return label;
+}
+
 // A labelled progress meter: title + percentage row, bar, and reset caption.
 class Meter {
     constructor(name) {
@@ -235,7 +247,7 @@ class Meter {
         this._fill = new St.Widget({style_class: 'cu-fill cu-ok'});
         this._track.add_child(this._fill);
 
-        this._caption = new St.Label({text: '', style_class: 'cu-caption'});
+        this._caption = wrapLabel(new St.Label({text: '', style_class: 'cu-caption'}));
 
         this.root.add_child(row);
         this.root.add_child(this._track);
@@ -488,10 +500,10 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._perModelBox = new St.BoxLayout({vertical: true});
         root.add_child(this._perModelBox);
 
-        this._extra = new St.Label({text: '', style_class: 'cu-extra'});
+        this._extra = wrapLabel(new St.Label({text: '', style_class: 'cu-extra'}));
         root.add_child(this._extra);
 
-        this._error = new St.Label({text: '', style_class: 'cu-error'});
+        this._error = wrapLabel(new St.Label({text: '', style_class: 'cu-error'}));
         this._error.visible = false;
         root.add_child(this._error);
 
