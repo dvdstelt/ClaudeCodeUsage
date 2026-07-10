@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 1.1.2 - 2026-07-10
+
 ### Changed
 - Gauge colors now reflect the *consequence* of a fast burn, not just the
   projected percentage. A window only turns red when you're out of headroom now
