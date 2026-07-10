@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or would be locked out for a meaningful stretch; a burn that only just runs
   out right before the reset stays amber. The caption matches (e.g. "on pace to
   run out just before reset" instead of "burning fast").
+- Long dropdown captions (and the extra-usage / error lines) now wrap onto a
+  second line instead of running off the edge of the popup.
 
 ## 1.1.1 - 2026-06-25
 
