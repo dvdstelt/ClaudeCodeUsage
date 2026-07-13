@@ -37,10 +37,11 @@
         <choice value="five-hour"/>
         <choice value="seven-day"/>
         <choice value="max"/>
+        <choice value="worst"/>
       </choices>
       <default>"five-hour"</default>
       <summary>Panel usage window</summary>
-      <description>Which usage window the panel ring and percentage reflect.</description>
+      <description>Which usage window the panel ring and percentage reflect: the 5-hour window, the 7-day window, the one with the highest utilization (max), or the worst active limit by severity (worst) — the latter surfaces a maxed-out per-model window such as Fable.</description>
     </key>
     <key name="poll-seconds" type="i">
       <range min="30" max="600"/>

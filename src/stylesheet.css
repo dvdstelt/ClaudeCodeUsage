@@ -101,6 +101,8 @@
     color: rgba(128, 128, 128, 1.0);
     margin: 2px 0 4px 0;
 }
+.cu-extra.cu-warn { color: #ffa348; }
+.cu-extra.cu-crit { color: #ff6b6b; }
 .cu-error {
     font-size: 9.5pt;
     color: #ff9c8a;
