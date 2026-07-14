@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- The popup usage bars now fill completely at 100%. The fill was sized from a
+  fixed pixel constant while the track stretches to the popup's width, so a
+  maxed-out window stopped a few pixels short of the end; the fill is now sized
+  as a fraction of the track's actual width and always reaches the end.
+
 ## 1.1.2 - 2026-07-10
 
 ### Changed
