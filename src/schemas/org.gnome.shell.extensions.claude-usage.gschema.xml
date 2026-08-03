@@ -48,6 +48,16 @@
       <summary>Refresh interval</summary>
       <description>How often, in seconds, to poll for updated usage.</description>
     </key>
+    <key name="profiles" type="s">
+      <default>'[]'</default>
+      <summary>Configured Claude Code profiles</summary>
+      <description>JSON array of {id, label, configDir} objects, one per Claude Code profile (a directory such as ~/.claude or ~/.claude-work holding its own .credentials.json).</description>
+    </key>
+    <key name="profiles-initialized" type="b">
+      <default>false</default>
+      <summary>Whether the profile list has been seeded</summary>
+      <description>Set once auto-detection has populated "profiles" for the first time, so a user who removes every profile afterwards isn't re-seeded.</description>
+    </key>
     <key name="access-token" type="s">
       <default>''</default>
       <summary>OAuth access token</summary>

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 1.2.0 - 2026-08-03
+
+### Added
+- Support for multiple Claude Code profiles (separate `CLAUDE_CONFIG_DIR`
+  accounts, e.g. `~/.claude` and `~/.claude-work`). All configured profiles are
+  shown side by side in the panel and the dropdown, and refresh together with
+  a single "Refresh all" action. Profiles are auto-detected on first run and
+  can be renamed, repointed, added, or removed from a new "Claude profiles"
+  group in preferences.
+
+### Changed
+- GNOME Shell 46 and 47 are now supported (previously 48-50 only), covering
+  Ubuntu 24.04 LTS.
+
 ## 1.1.2 - 2026-07-10
 
 ### Changed

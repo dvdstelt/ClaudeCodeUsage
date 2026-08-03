@@ -18,6 +18,12 @@ preferences window.
   horizontal bar, your choice, or none), a percentage, an optional time-until-
   reset countdown, and a subscription tier label. Each element can be toggled
   independently.
+- **Multiple profiles.** If you run more than one Claude Code account on this
+  machine (via `CLAUDE_CONFIG_DIR`, e.g. `~/.claude` and `~/.claude-work`), the
+  extension shows every configured profile side by side in the panel and the
+  dropdown, and refreshes them all together. Profiles are auto-detected on
+  first run; add, rename, repoint, or remove them from the "Claude profiles"
+  group in preferences.
 - **Dropdown** with per-window meters: the 5-hour window, the 7-day window, and
   any per-model 7-day windows the API reports (for example Opus and Sonnet),
   discovered automatically.
@@ -36,10 +42,11 @@ preferences window.
 
 ## Requirements
 
-- GNOME Shell 48, 49, or 50.
+- GNOME Shell 46, 47, 48, 49, or 50 (Ubuntu 24.04 LTS and newer).
 - Either:
   - **Claude Code** signed in (the extension reads
-    `~/.claude/.credentials.json`), or
+    `~/.claude/.credentials.json`, or another profile directory you configure
+    in preferences), or
   - an in-app sign-in via the preferences window (see Authentication below).
 
 ## Install
@@ -152,7 +159,11 @@ The repository is laid out as:
   - `prefs.js` - Adwaita preferences, including the fallback sign-in flow.
   - `stylesheet.css` - panel and popup styling.
   - `lib/usageClient.js` - token resolution, refresh, and the usage/profile
-    calls.
+    calls, parameterized by config directory so each profile gets its own
+    client.
+  - `lib/profiles.js` - the profile list (label + config directory), stored as
+    JSON in GSettings; auto-detects `~/.claude` and sibling `~/.claude-*`
+    directories on first run.
   - `lib/oauth.js` - shared OAuth/API constants and text codecs used by both
     the usage client and prefs.
   - `schemas/` - GSettings schema. Recompile after edits with

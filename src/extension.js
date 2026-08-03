@@ -12,6 +12,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {UsageClient, UsageError} from './lib/usageClient.js';
+import {loadProfiles, ensureProfiles} from './lib/profiles.js';
 
 const TRACK_WIDTH = 300;
 const USAGE_SETTINGS_URL = 'https://claude.ai/settings/usage';
@@ -51,9 +52,10 @@ const RING_SIZE = 18;
 const RING_WIDTH = 3;
 const PANEL_BAR_WIDTH = 34;
 
-// StThemeNode colors are Cogl.Color. Across GNOME 48-50 the components come
-// back either as 0-255 bytes or as 0-1 floats depending on the GJS build, so
-// detect the scale instead of assuming one. Returns an [r, g, b] float triple.
+// StThemeNode colors are Cogl.Color. Across GNOME Shell versions the
+// components come back either as 0-255 bytes or as 0-1 floats depending on
+// the GJS build, so detect the scale instead of assuming one. Returns an
+// [r, g, b] float triple.
 function colorRgb(c) {
     const scale = Math.max(c.red, c.green, c.blue) > 1 ? 255 : 1;
     return [c.red / scale, c.green / scale, c.blue / scale];
@@ -187,6 +189,15 @@ function modelLabel(name) {
     const known = {opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', oauth_apps: 'OAuth Apps'};
     return known[name] ??
         name.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+// Short (1-2 letter) chip for a profile label, so the panel can distinguish
+// multiple profiles without much width: "TechZu" -> "TE", "My Team" -> "MT".
+function profileChip(label) {
+    const words = (label ?? '').trim().split(/\s+/).filter(Boolean);
+    if (words.length >= 2)
+        return (words[0][0] + words[1][0]).toUpperCase();
+    return (label ?? '').slice(0, 2).toUpperCase() || '?';
 }
 
 function relativeReset(iso) {
@@ -376,88 +387,85 @@ class PanelBar {
     }
 }
 
-const ClaudeUsageIndicator = GObject.registerClass(
-class ClaudeUsageIndicator extends PanelMenu.Button {
-    _init(path, settings, openPreferences) {
-        super._init(0.5, 'Claude Code Usage Monitor');
-
-        this._path = path;
+// Everything specific to one Claude Code profile (one config directory / one
+// account): its own token client, panel block, and popup section. Multiple
+// instances are orchestrated by ClaudeUsageIndicator, which shares a single
+// panel icon, poll timer, and countdown across all of them.
+class ProfileView {
+    constructor(profile, settings, panelBox, sectionsBox, showChip, isFirst) {
+        this.profile = profile;
         this._settings = settings;
-        this._openPreferences = openPreferences;
-        this._client = new UsageClient(settings);
-        this._busy = false;
-        this._cancellable = new Gio.Cancellable();
+        this._client = new UsageClient({configDir: profile.configDir, settings});
         this._lastUsage = null;
-        this._lastFetchMs = 0;
-        this._perModelMeters = new Map();
         this._meterBindings = [];
-        this._countdownTimer = null;
+        this._perModelMeters = new Map();
 
-        // ---- panel button ----
-        const box = new St.BoxLayout({style_class: 'cu-panel'});
-        this._panelIcon = new St.Icon({
-            gicon: Gio.icon_new_for_string(`${path}/icons/claude-spark.svg`),
-            style_class: 'cu-panel-icon',
-            y_align: Clutter.ActorAlign.CENTER,
-        });
+        // ---- panel block ----
+        this._panelBlock = new St.BoxLayout({style_class: 'cu-panel-block'});
+        this._panelSep = null;
+        if (!isFirst) {
+            this._panelSep = new St.Widget({style_class: 'cu-panel-sep', y_align: Clutter.ActorAlign.CENTER});
+            panelBox.add_child(this._panelSep);
+        }
+        if (showChip) {
+            this._chip = new St.Label({
+                text: profileChip(profile.label),
+                style_class: 'cu-panel-chip',
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            this._panelBlock.add_child(this._chip);
+        }
         this._ring = new Ring();
         this._panelBar = new PanelBar();
         this._panelPct = new St.Label({text: '…', style_class: 'cu-panel-pct', y_align: Clutter.ActorAlign.CENTER});
         this._panelReset = new St.Label({text: '', style_class: 'cu-panel-reset', y_align: Clutter.ActorAlign.CENTER});
         this._panelTier = new St.Label({text: '', style_class: 'cu-panel-tier', y_align: Clutter.ActorAlign.CENTER});
-        box.add_child(this._panelIcon);
-        box.add_child(this._ring);
-        box.add_child(this._panelBar.root);
-        box.add_child(this._panelPct);
-        box.add_child(this._panelReset);
-        box.add_child(this._panelTier);
-        this.add_child(box);
+        this._panelBlock.add_child(this._ring);
+        this._panelBlock.add_child(this._panelBar.root);
+        this._panelBlock.add_child(this._panelPct);
+        this._panelBlock.add_child(this._panelReset);
+        this._panelBlock.add_child(this._panelTier);
+        panelBox.add_child(this._panelBlock);
 
-        this._buildMenu();
-
-        // connectObject ties these handlers to `this`, so a single
-        // disconnectObject(this) in destroy() (and the automatic cleanup when
-        // this actor is destroyed) tears them all down.
-        this.menu.connectObject('open-state-changed', (_m, open) => {
-            if (open)
-                this._refresh();
-        }, this);
-
-        // Live-apply preference changes without needing a shell reload.
-        this._settings.connectObject(
-            'changed::show-icon', () => this._applyVisibility(),
-            'changed::panel-gauge', () => this._applyVisibility(),
-            'changed::show-percentage', () => this._applyVisibility(),
-            'changed::show-tier', () => this._applyVisibility(),
-            'changed::show-reset', () => this._applyVisibility(),
-            'changed::panel-window', () => this._renderPanel(),
-            'changed::poll-seconds', () => this._startTimer(),
-            // Signing in (or out) from prefs changes the token source; refetch.
-            'changed::access-token', () => this._refresh(true),
-            this);
-
-        this._applyVisibility();
-
-        // Tier is on disk, so show it immediately without waiting for the network.
-        this._applyTierFromDisk();
-        this._refresh();
-        this._startTimer();
-    }
-
-    _startTimer() {
-        if (this._timer) {
-            GLib.source_remove(this._timer);
-            this._timer = null;
-        }
-        const seconds = this._settings.get_int('poll-seconds');
-        this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, seconds, () => {
-            this._refresh();
-            return GLib.SOURCE_CONTINUE;
+        // ---- popup section ----
+        this._section = new St.BoxLayout({
+            vertical: true,
+            style_class: isFirst ? 'cu-profile-section' : 'cu-profile-section cu-profile-section-divider',
         });
+
+        const header = new St.BoxLayout({style_class: 'cu-profile-header'});
+        const who = new St.BoxLayout({vertical: true, x_expand: true});
+        this._label = new St.Label({text: profile.label, style_class: 'cu-title'});
+        this._subtitle = new St.Label({text: '', style_class: 'cu-subtitle'});
+        who.add_child(this._label);
+        who.add_child(this._subtitle);
+        this._pill = new St.Label({text: '', style_class: 'cu-pill', y_align: Clutter.ActorAlign.CENTER});
+        header.add_child(who);
+        header.add_child(this._pill);
+        this._section.add_child(header);
+
+        this._fiveHour = new Meter('5-hour window');
+        this._sevenDay = new Meter('7-day window');
+        this._section.add_child(this._fiveHour.root);
+        this._section.add_child(this._sevenDay.root);
+        // Per-model 7-day meters are added here on demand.
+        this._perModelBox = new St.BoxLayout({vertical: true});
+        this._section.add_child(this._perModelBox);
+
+        this._extra = wrapLabel(new St.Label({text: '', style_class: 'cu-extra'}));
+        this._section.add_child(this._extra);
+
+        this._error = wrapLabel(new St.Label({text: '', style_class: 'cu-error'}));
+        this._error.visible = false;
+        this._section.add_child(this._error);
+
+        this._updated = new St.Label({text: 'Loading…', style_class: 'cu-updated'});
+        this._section.add_child(this._updated);
+
+        sectionsBox.add_child(this._section);
     }
 
-    _applyVisibility() {
-        this._panelIcon.visible = this._settings.get_boolean('show-icon');
+    applyVisibility() {
         const gauge = this._settings.get_string('panel-gauge');
         this._ring.visible = gauge === 'ring';
         this._panelBar.root.visible = gauge === 'bar';
@@ -466,79 +474,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._panelReset.visible = this._settings.get_boolean('show-reset');
     }
 
-    _buildMenu() {
-        const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
-        const root = new St.BoxLayout({vertical: true, style_class: 'cu-popup'});
-        item.add_child(root);
-        this.menu.addMenuItem(item);
-
-        // header
-        const header = new St.BoxLayout({style_class: 'cu-header'});
-        const logo = new St.Icon({
-            gicon: Gio.icon_new_for_string(`${this._path}/icons/octopus.png`),
-            style_class: 'cu-logo',
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        const who = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
-        this._title = new St.Label({text: 'Claude', style_class: 'cu-title'});
-        this._subtitle = new St.Label({text: 'usage', style_class: 'cu-subtitle'});
-        who.add_child(this._title);
-        who.add_child(this._subtitle);
-        this._pill = new St.Label({text: '', style_class: 'cu-pill', y_align: Clutter.ActorAlign.CENTER});
-        header.add_child(logo);
-        header.add_child(who);
-        header.add_child(this._pill);
-        root.add_child(header);
-
-        // limits section
-        this._sectionLabel(root, 'Usage limits');
-        this._fiveHour = new Meter('5-hour window');
-        this._sevenDay = new Meter('7-day window');
-        root.add_child(this._fiveHour.root);
-        root.add_child(this._sevenDay.root);
-        // Per-model 7-day meters are added here on demand.
-        this._perModelBox = new St.BoxLayout({vertical: true});
-        root.add_child(this._perModelBox);
-
-        this._extra = wrapLabel(new St.Label({text: '', style_class: 'cu-extra'}));
-        root.add_child(this._extra);
-
-        this._error = wrapLabel(new St.Label({text: '', style_class: 'cu-error'}));
-        this._error.visible = false;
-        root.add_child(this._error);
-
-        // actions
-        const actions = new St.BoxLayout({style_class: 'cu-actions'});
-        const openUsage = new St.Button({label: 'Usage page', style_class: 'cu-btn cu-btn-pri', x_expand: true});
-        openUsage.connect('clicked', () => {
-            this.menu.close();
-            Gio.AppInfo.launch_default_for_uri(USAGE_SETTINGS_URL, null);
-        });
-        actions.add_child(openUsage);
-        root.add_child(actions);
-
-        // footer
-        const footer = new St.BoxLayout({style_class: 'cu-footer'});
-        this._updated = new St.Label({text: 'Loading…', style_class: 'cu-updated', x_expand: true});
-        const settings = new St.Button({label: '⚙ Settings', style_class: 'cu-refresh'});
-        settings.connect('clicked', () => {
-            this.menu.close();
-            this._openPreferences?.();
-        });
-        const refresh = new St.Button({label: '↻ Refresh', style_class: 'cu-refresh'});
-        refresh.connect('clicked', () => this._refresh(true));
-        footer.add_child(this._updated);
-        footer.add_child(settings);
-        footer.add_child(refresh);
-        root.add_child(footer);
-    }
-
-    _sectionLabel(parent, text) {
-        parent.add_child(new St.Label({text: text.toUpperCase(), style_class: 'cu-section'}));
-    }
-
-    async _applyTierFromDisk() {
-        const cancellable = this._cancellable;
+    async applyTierFromDisk(cancellable) {
         try {
             const {subscriptionType, rateLimitTier} = await this._client.tierFromDisk();
             if (cancellable.is_cancelled())
@@ -546,46 +482,27 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             const label = tierLabel(subscriptionType, rateLimitTier);
             this._pill.text = label;
             this._panelTier.text = label.split(' ')[0];
-        } catch (e) {
+        } catch {
             // Not signed in yet; the refresh will surface a clearer message.
         }
     }
 
-    // force bypasses the min-gap throttle (used for explicit user actions like
-    // signing in); opening the popup and the poll timer go through the throttle.
-    _refresh(force = false) {
-        if (this._busy)
-            return;
-        if (!force && Date.now() - this._lastFetchMs < MIN_REFRESH_MS)
-            return;
-        this._busy = true;
-        this._lastFetchMs = Date.now();
-
-        // Capture the cancellable: after teardown it is cancelled (and the
-        // instance reference nulled), which is how we know to drop a late
-        // callback instead of touching destroyed actors.
-        const cancellable = this._cancellable;
-
-        // Usage is required; the profile is cosmetic (name and tier pill), so a
-        // profile failure must not blank out otherwise-good usage data. Run
-        // both in parallel and only surface an error when usage itself fails.
-        Promise.allSettled([
+    // Fetches usage + profile for this account only; never rejects (errors are
+    // reported through renderError). Caller drives concurrency across profiles.
+    async refresh(cancellable) {
+        const [usageRes, profileRes] = await Promise.allSettled([
             this._client.fetchUsage(cancellable),
             this._client.fetchProfile(cancellable),
-        ]).then(([usageRes, profileRes]) => {
-            if (cancellable.is_cancelled())
-                return;
-            if (usageRes.status === 'rejected') {
-                this._renderError(usageRes.reason);
-                return;
-            }
-            if (profileRes.status === 'rejected')
-                logError(profileRes.reason, 'claude-usage: profile fetch failed (non-fatal)');
-            this._render(usageRes.value,
-                profileRes.status === 'fulfilled' ? profileRes.value : null);
-        }).finally(() => {
-            this._busy = false;
-        });
+        ]);
+        if (cancellable.is_cancelled())
+            return;
+        if (usageRes.status === 'rejected') {
+            this._renderError(usageRes.reason);
+            return;
+        }
+        if (profileRes.status === 'rejected')
+            logError(profileRes.reason, `claude-usage: profile fetch failed for "${this.profile.label}" (non-fatal)`);
+        this._render(usageRes.value, profileRes.status === 'fulfilled' ? profileRes.value : null);
     }
 
     _render(usage, profile) {
@@ -593,7 +510,6 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._lastUsage = usage;
 
         if (profile?.account) {
-            this._title.text = profile.account.display_name || profile.account.full_name || 'Claude';
             const sub = profile.application?.name ?? 'Claude';
             this._subtitle.text = profile.organization?.subscription_status === 'active' ? `${sub} · active` : sub;
             this._pill.text = tierLabel(
@@ -635,12 +551,6 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         const xu = usage.extra_usage;
         if (xu && xu.is_enabled) {
             const cur = xu.currency || '';
-            // NOTE: the units of used_credits and monthly_limit are not
-            // confirmed against a live extra_usage payload. We scale both the
-            // same way (treating them as minor units, e.g. cents) so the two
-            // numbers are at least consistent; the previous code scaled only
-            // monthly_limit, which could not be right for both. Verify against
-            // real data and adjust the divisor if needed.
             const money = v => Number.isFinite(v) ? `${cur} ${(v / 100).toFixed(2)}`.trim() : null;
             const used = money(Number(xu.used_credits));
             const limit = money(Number(xu.monthly_limit));
@@ -653,8 +563,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             this._extra.visible = false;
         }
 
-        this._renderPanel();
-        this._scheduleCountdown();
+        this.renderPanel();
 
         const now = GLib.DateTime.new_now_local();
         this._updated.text = `Updated ${now.format('%H:%M:%S')}`;
@@ -667,8 +576,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._applyWindow(meter, win, total);
     }
 
-    // Soonest reset across all on-screen windows, in seconds, or null if none.
-    _soonestResetSeconds() {
+    // Soonest reset among this profile's on-screen windows, in seconds, or null.
+    soonestResetSeconds() {
         let soonest = null;
         for (const {win} of this._meterBindings) {
             if (!win?.resets_at)
@@ -683,32 +592,13 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         return soonest;
     }
 
-    // Tick the "resets in …" captions between polls: every second once a reset
-    // is under 90s away (so the seconds display is live), every 30s otherwise.
-    _scheduleCountdown() {
-        if (this._countdownTimer) {
-            GLib.source_remove(this._countdownTimer);
-            this._countdownTimer = null;
-        }
-        const soonest = this._soonestResetSeconds();
-        if (soonest === null)
-            return;
-        const interval = soonest < 90 ? 1 : 30;
-        this._countdownTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
-            this._countdownTimer = null;
-            this._refreshCountdowns();
-            this._scheduleCountdown();
-            return GLib.SOURCE_REMOVE;
-        });
-    }
-
     // Re-apply meters and panel from the last fetched usage (captions only move).
-    _refreshCountdowns() {
+    refreshCountdowns() {
         if (!this._lastUsage)
             return;
         for (const {meter, win, total} of this._meterBindings)
             this._applyWindow(meter, win, total);
-        this._renderPanel();
+        this.renderPanel();
     }
 
     // Renders a meter from a usage window. The color reflects the consequence
@@ -753,7 +643,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         }
     }
 
-    _renderPanel() {
+    renderPanel() {
         const sel = this._panelWindow();
         if (!sel || !sel.win) {
             this._panelPct.text = '—';
@@ -773,15 +663,14 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     }
 
     _renderError(e) {
-        // A cancelled request means the extension is being torn down; nothing
-        // to show. (Callers already drop cancelled results, so this is belt
-        // and braces.)
+        // A cancelled request means the extension is being torn down (or
+        // profiles are being rebuilt); nothing to show.
         if (e instanceof GLib.Error && e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
             return;
         // A 429 is transient (we polled a touch too soon). If we already have
         // usage on screen, keep showing it instead of flashing an error.
         if (e instanceof UsageError && e.status === 429 && this._lastUsage) {
-            logError(e, 'claude-usage: rate limited, keeping last data');
+            logError(e, `claude-usage: rate limited for "${this.profile.label}", keeping last data`);
             return;
         }
         this._panelPct.text = '!';
@@ -799,7 +688,250 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._error.text = msg;
         this._error.visible = true;
         this._updated.text = 'Update failed';
-        logError(e, 'claude-usage: refresh failed');
+        logError(e, `claude-usage: refresh failed for "${this.profile.label}"`);
+    }
+
+    destroy() {
+        this._fiveHour?.destroy();
+        this._sevenDay?.destroy();
+        for (const meter of this._perModelMeters.values())
+            meter.destroy();
+        this._perModelMeters.clear();
+        this._panelBar?.destroy();
+        this._chip?.destroy();
+        this._panelSep?.destroy();
+        this._panelBlock?.destroy();
+        this._section?.destroy();
+        this._fiveHour = null;
+        this._sevenDay = null;
+        this._panelBar = null;
+        this._ring = null;
+        this._panelReset = null;
+        this._panelSep = null;
+        this._panelBlock = null;
+        this._section = null;
+        this._meterBindings = [];
+        this._lastUsage = null;
+        this._client = null;
+    }
+}
+
+const ClaudeUsageIndicator = GObject.registerClass(
+class ClaudeUsageIndicator extends PanelMenu.Button {
+    _init(path, settings, openPreferences) {
+        super._init(0.5, 'Claude Code Usage Monitor');
+
+        this._path = path;
+        this._settings = settings;
+        this._openPreferences = openPreferences;
+        this._busy = false;
+        this._cancellable = new Gio.Cancellable();
+        this._lastFetchMs = 0;
+        this._profileViews = [];
+        this._countdownTimer = null;
+        this._timer = null;
+
+        // ---- panel button ----
+        this._panelBox = new St.BoxLayout({style_class: 'cu-panel'});
+        this._panelIcon = new St.Icon({
+            gicon: Gio.icon_new_for_string(`${path}/icons/claude-spark.svg`),
+            style_class: 'cu-panel-icon',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._panelBox.add_child(this._panelIcon);
+        // Profile blocks are appended after the icon by _rebuildProfiles().
+        this.add_child(this._panelBox);
+
+        this._buildMenuShell();
+
+        // connectObject ties these handlers to `this`, so a single
+        // disconnectObject(this) in destroy() (and the automatic cleanup when
+        // this actor is destroyed) tears them all down.
+        this.menu.connectObject('open-state-changed', (_m, open) => {
+            if (open)
+                this._refresh();
+        }, this);
+
+        // Live-apply preference changes without needing a shell reload.
+        this._settings.connectObject(
+            'changed::show-icon', () => this._applyVisibility(),
+            'changed::panel-gauge', () => this._applyVisibility(),
+            'changed::show-percentage', () => this._applyVisibility(),
+            'changed::show-tier', () => this._applyVisibility(),
+            'changed::show-reset', () => this._applyVisibility(),
+            'changed::panel-window', () => this._renderAllPanels(),
+            'changed::poll-seconds', () => this._startTimer(),
+            // Signing in (or out) from prefs changes the token source; refetch.
+            'changed::access-token', () => this._refresh(true),
+            // Profiles were added/removed/renamed/repointed in prefs.
+            'changed::profiles', () => this._rebuildFromSettings(),
+            this);
+
+        this._applyVisibility();
+        this._initProfiles();
+    }
+
+    // One-time async setup: seeds the profile list (auto-detection) if it's
+    // empty, then builds the views. Later profile edits go through
+    // _rebuildFromSettings() instead, which is synchronous and cheap.
+    async _initProfiles() {
+        const cancellable = this._cancellable;
+        const profiles = await ensureProfiles(this._settings);
+        if (cancellable.is_cancelled())
+            return;
+        this._buildProfileViews(profiles);
+    }
+
+    _rebuildFromSettings() {
+        this._buildProfileViews(loadProfiles(this._settings));
+    }
+
+    _buildProfileViews(profiles) {
+        this._destroyProfileViews();
+        const showChip = profiles.length > 1;
+        this._profileViews = profiles.map((profile, i) =>
+            new ProfileView(profile, this._settings, this._panelBox, this._sectionsBox, showChip, i === 0));
+        this._applyVisibility();
+        for (const view of this._profileViews)
+            view.applyTierFromDisk(this._cancellable);
+        this._refresh(true);
+        this._startTimer();
+    }
+
+    _destroyProfileViews() {
+        if (this._countdownTimer) {
+            GLib.source_remove(this._countdownTimer);
+            this._countdownTimer = null;
+        }
+        for (const view of this._profileViews)
+            view.destroy();
+        this._profileViews = [];
+    }
+
+    _buildMenuShell() {
+        const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
+        const root = new St.BoxLayout({vertical: true, style_class: 'cu-popup'});
+        item.add_child(root);
+        this.menu.addMenuItem(item);
+
+        // header (static branding; per-profile identity lives in each section)
+        const header = new St.BoxLayout({style_class: 'cu-header'});
+        const logo = new St.Icon({
+            gicon: Gio.icon_new_for_string(`${this._path}/icons/octopus.png`),
+            style_class: 'cu-logo',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        const who = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        who.add_child(new St.Label({text: 'Claude', style_class: 'cu-title'}));
+        who.add_child(new St.Label({text: 'usage', style_class: 'cu-subtitle'}));
+        header.add_child(logo);
+        header.add_child(who);
+        root.add_child(header);
+
+        // One section per profile, rebuilt whenever the profile list changes.
+        this._sectionsBox = new St.BoxLayout({vertical: true});
+        root.add_child(this._sectionsBox);
+
+        // actions
+        const actions = new St.BoxLayout({style_class: 'cu-actions'});
+        const openUsage = new St.Button({label: 'Usage page', style_class: 'cu-btn cu-btn-pri', x_expand: true});
+        openUsage.connect('clicked', () => {
+            this.menu.close();
+            Gio.AppInfo.launch_default_for_uri(USAGE_SETTINGS_URL, null);
+        });
+        actions.add_child(openUsage);
+        root.add_child(actions);
+
+        // footer
+        const footer = new St.BoxLayout({style_class: 'cu-footer'});
+        const settingsBtn = new St.Button({label: '⚙ Settings', style_class: 'cu-refresh', x_expand: true});
+        settingsBtn.connect('clicked', () => {
+            this.menu.close();
+            this._openPreferences?.();
+        });
+        const refreshLabel = this._profileViews?.length > 1 ? '↻ Refresh all' : '↻ Refresh';
+        this._refreshBtn = new St.Button({label: refreshLabel, style_class: 'cu-refresh', x_expand: true});
+        this._refreshBtn.connect('clicked', () => this._refresh(true));
+        footer.add_child(settingsBtn);
+        footer.add_child(this._refreshBtn);
+        root.add_child(footer);
+    }
+
+    _startTimer() {
+        if (this._timer) {
+            GLib.source_remove(this._timer);
+            this._timer = null;
+        }
+        const seconds = this._settings.get_int('poll-seconds');
+        this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, seconds, () => {
+            this._refresh();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _applyVisibility() {
+        this._panelIcon.visible = this._settings.get_boolean('show-icon');
+        for (const view of this._profileViews)
+            view.applyVisibility();
+        if (this._refreshBtn)
+            this._refreshBtn.label = this._profileViews.length > 1 ? '↻ Refresh all' : '↻ Refresh';
+    }
+
+    _renderAllPanels() {
+        for (const view of this._profileViews)
+            view.renderPanel();
+    }
+
+    // force bypasses the min-gap throttle (used for explicit user actions like
+    // signing in or editing profiles); opening the popup and the poll timer go
+    // through the throttle. All profiles are fetched concurrently, which is
+    // both faster and simpler than the user refreshing each one by hand.
+    _refresh(force = false) {
+        if (this._busy || this._profileViews.length === 0)
+            return;
+        if (!force && Date.now() - this._lastFetchMs < MIN_REFRESH_MS)
+            return;
+        this._busy = true;
+        this._lastFetchMs = Date.now();
+
+        const cancellable = this._cancellable;
+        Promise.allSettled(this._profileViews.map(view => view.refresh(cancellable)))
+            .finally(() => {
+                this._busy = false;
+                if (!cancellable.is_cancelled())
+                    this._scheduleCountdown();
+            });
+    }
+
+    // Soonest reset across every window of every profile, in seconds, or null.
+    _soonestResetSeconds() {
+        let soonest = null;
+        for (const view of this._profileViews) {
+            const rem = view.soonestResetSeconds();
+            if (rem !== null && (soonest === null || rem < soonest))
+                soonest = rem;
+        }
+        return soonest;
+    }
+
+    // Tick the "resets in …" captions between polls: every second once a reset
+    // is under 90s away (so the seconds display is live), every 30s otherwise.
+    _scheduleCountdown() {
+        if (this._countdownTimer) {
+            GLib.source_remove(this._countdownTimer);
+            this._countdownTimer = null;
+        }
+        const soonest = this._soonestResetSeconds();
+        if (soonest === null)
+            return;
+        const interval = soonest < 90 ? 1 : 30;
+        this._countdownTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
+            this._countdownTimer = null;
+            for (const view of this._profileViews)
+                view.refreshCountdowns();
+            this._scheduleCountdown();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     destroy() {
@@ -819,23 +951,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._settings.disconnectObject(this);
         this._settings = null;
 
-        // Tear down the gauge/meter helpers and release their references; the
-        // actors themselves also go with super.destroy(), but releasing here
-        // keeps ownership explicit.
-        this._fiveHour?.destroy();
-        this._sevenDay?.destroy();
-        for (const meter of this._perModelMeters.values())
-            meter.destroy();
-        this._perModelMeters.clear();
-        this._panelBar?.destroy();
-        this._fiveHour = null;
-        this._sevenDay = null;
-        this._panelBar = null;
-        this._ring = null;
-        this._panelReset = null;
-        this._meterBindings = [];
-        this._lastUsage = null;
-        this._client = null;
+        this._destroyProfileViews();
 
         super.destroy();
     }

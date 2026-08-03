@@ -1,14 +1,30 @@
 #!/usr/bin/env -S gjs -m
 // Standalone check: validates the usage client against the live API.
-//   gjs -m tools/poll.js   (run from the repository root)
+//   gjs -m tools/poll.js                    (uses ~/.claude)
+//   gjs -m tools/poll.js ~/.claude-work      (a second Claude Code profile)
 import GLib from 'gi://GLib';
-import {UsageClient} from '../src/lib/usageClient.js';
+import {UsageClient, defaultConfigDir} from '../src/lib/usageClient.js';
 
 const loop = GLib.MainLoop.new(null, false);
 
-async function run() {
-    const client = new UsageClient();
+// GJS exposes extra script arguments as the global ARGV regardless of module
+// mode. Accept an absolute path, a ~/-relative path, or a path relative to cwd.
+function resolveConfigDir(arg) {
+    if (!arg)
+        return defaultConfigDir();
+    if (arg.startsWith('~/'))
+        return GLib.build_filenamev([GLib.get_home_dir(), arg.slice(2)]);
+    if (GLib.path_is_absolute(arg))
+        return arg;
+    return GLib.build_filenamev([GLib.get_current_dir(), arg]);
+}
 
+const configDir = resolveConfigDir(typeof ARGV !== 'undefined' ? ARGV[0] : undefined);
+
+async function run() {
+    const client = new UsageClient({configDir});
+
+    print('config dir:', configDir);
     print('tier (from disk):', JSON.stringify(await client.tierFromDisk()));
 
     const profile = await client.fetchProfile();

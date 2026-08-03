@@ -14,17 +14,79 @@ import {
 // Refresh when the token expires within this many milliseconds.
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
 
-function credentialsPath() {
-    return GLib.build_filenamev([GLib.get_home_dir(), '.claude', '.credentials.json']);
+// Default Claude Code config directory, used when a profile does not specify
+// its own (keeps single-profile setups working unchanged).
+export function defaultConfigDir() {
+    return GLib.build_filenamev([GLib.get_home_dir(), '.claude']);
+}
+
+function credentialsPath(configDir) {
+    return GLib.build_filenamev([configDir, '.credentials.json']);
+}
+
+// Looks for ~/.claude and any sibling ~/.claude-* directory that holds a
+// .credentials.json, for seeding the profile list on first run. Each Claude
+// Code profile is just a config directory selected via CLAUDE_CONFIG_DIR; this
+// mirrors that convention instead of inventing a new one. Never rejects.
+export async function discoverConfigDirs() {
+    const home = GLib.get_home_dir();
+    const found = [];
+    try {
+        const dir = Gio.File.new_for_path(home);
+        const enumerator = await new Promise((resolve, reject) => {
+            dir.enumerate_children_async(
+                'standard::name,standard::type', Gio.FileQueryInfoFlags.NONE,
+                GLib.PRIORITY_DEFAULT, null, (f, res) => {
+                    try {
+                        resolve(f.enumerate_children_finish(res));
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+        });
+        // next_files_async/finish (a batch of GFileInfo per round-trip) rather
+        // than the synchronous next_file(), which would block the main loop
+        // once per directory entry.
+        for (;;) {
+            const infos = await new Promise((resolve, reject) => {
+                enumerator.next_files_async(64, GLib.PRIORITY_DEFAULT, null, (e, res) => {
+                    try {
+                        resolve(e.next_files_finish(res));
+                    } catch (err) {
+                        reject(err);
+                    }
+                });
+            });
+            if (infos.length === 0)
+                break;
+            for (const info of infos) {
+                const name = info.get_name();
+                if (name !== '.claude' && !/^\.claude-/.test(name))
+                    continue;
+                if (info.get_file_type() !== Gio.FileType.DIRECTORY)
+                    continue;
+                const configDir = GLib.build_filenamev([home, name]);
+                if (await readCredentialsRoot(configDir))
+                    found.push({name, configDir});
+            }
+        }
+        enumerator.close_async(GLib.PRIORITY_DEFAULT, null, () => {});
+    } catch {
+        // Home directory unreadable for some reason; caller falls back to a
+        // single default profile.
+    }
+    // Stable order: the plain ~/.claude profile first, then alphabetically.
+    found.sort((a, b) => (a.name === '.claude' ? -1 : b.name === '.claude' ? 1 : a.name.localeCompare(b.name)));
+    return found;
 }
 
 // Reads and parses Claude Code's credentials file asynchronously (shell code
 // must avoid synchronous file IO). Resolves to the parsed root object when it
 // holds an access token, or null otherwise. Never rejects: a missing file or
 // bad JSON resolves to null.
-async function readCredentialsRoot() {
+async function readCredentialsRoot(configDir) {
     try {
-        const file = Gio.File.new_for_path(credentialsPath());
+        const file = Gio.File.new_for_path(credentialsPath(configDir));
         const bytes = await new Promise((resolve, reject) => {
             file.load_contents_async(null, (f, res) => {
                 try {
@@ -53,8 +115,8 @@ async function readCredentialsRoot() {
 // e.g. for someone who only uses Claude Desktop), so we surface the in-app
 // sign-in as a fallback. An active CLI user keeps a non-expired access token,
 // so the sign-in stays hidden for them.
-export async function claudeCodeCredentialsAvailable() {
-    const root = await readCredentialsRoot();
+export async function claudeCodeCredentialsAvailable(configDir = defaultConfigDir()) {
+    const root = await readCredentialsRoot(configDir);
     if (!root)
         return false;
     const expiresAt = Number(root.claudeAiOauth.expiresAt) || 0;
@@ -71,10 +133,12 @@ export class UsageError extends Error {
 }
 
 export class UsageClient {
-    // settings is optional; when provided it supplies the extension's own
-    // OAuth tokens (from the in-app sign-in) as a fallback for users without
-    // Claude Code installed.
-    constructor(settings = null) {
+    // configDir is the Claude Code config directory to read/write credentials
+    // in (defaults to ~/.claude). settings is optional; when provided it
+    // supplies the extension's own OAuth tokens (from the in-app sign-in) as a
+    // fallback for profiles without usable on-disk credentials.
+    constructor({configDir = defaultConfigDir(), settings = null} = {}) {
+        this._configDir = configDir;
         this._settings = settings;
         this._session = new Soup.Session();
         this._session.timeout = 15;
@@ -85,7 +149,7 @@ export class UsageClient {
     // Writes Claude Code's credentials back asynchronously (no synchronous file
     // IO on the shell main loop).
     _writeCredentials(root) {
-        const file = Gio.File.new_for_path(credentialsPath());
+        const file = Gio.File.new_for_path(credentialsPath(this._configDir));
         const data = encoder.encode(JSON.stringify(root, null, 2));
         return new Promise((resolve, reject) => {
             // PRIVATE keeps the file at 0600 so the token stays owner-only.
@@ -221,7 +285,7 @@ export class UsageClient {
     }
 
     async _resolveToken() {
-        const root = await readCredentialsRoot();
+        const root = await readCredentialsRoot(this._configDir);
         if (root) {
             const oauth = root.claudeAiOauth;
             const expiresAt = Number(oauth.expiresAt) || 0;
@@ -256,7 +320,7 @@ export class UsageClient {
     // Returns nulls when Claude Code is not signed in (the in-app token path
     // has no tier on disk; it arrives with the profile fetch instead).
     async tierFromDisk() {
-        const oauth = (await readCredentialsRoot())?.claudeAiOauth;
+        const oauth = (await readCredentialsRoot(this._configDir))?.claudeAiOauth;
         return {
             subscriptionType: oauth?.subscriptionType ?? null,
             rateLimitTier: oauth?.rateLimitTier ?? null,
