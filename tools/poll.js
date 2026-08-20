@@ -19,13 +19,34 @@ async function run() {
 
     const usage = await client.fetchUsage();
     print('\nusage windows:');
-    for (const key of ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet']) {
+    for (const key of ['five_hour', 'seven_day']) {
         const w = usage[key];
         if (w)
             print(`  ${key}: ${w.utilization}%  resets ${w.resets_at}`);
         else
             print(`  ${key}: (null)`);
     }
+
+    // Model-scoped weekly windows (e.g. Fable). Legacy payloads put these in
+    // top-level seven_day_<name> keys, newer ones in the `limits` array.
+    print('\nscoped windows:');
+    let scoped = 0;
+    for (const key of Object.keys(usage)) {
+        const m = /^seven_day_(.+)$/.exec(key);
+        if (m && usage[key]) {
+            scoped++;
+            print(`  ${m[1]} (legacy key): ${usage[key].utilization}%  resets ${usage[key].resets_at}`);
+        }
+    }
+    for (const entry of usage.limits ?? []) {
+        const name = entry?.scope?.model?.display_name;
+        if (name && entry.group === 'weekly') {
+            scoped++;
+            print(`  ${name} (limits/${entry.kind}): ${entry.percent}%  resets ${entry.resets_at}`);
+        }
+    }
+    if (!scoped)
+        print('  (none)');
     if (usage.extra_usage)
         print(`  extra_usage: ${usage.extra_usage.used_credits}/${usage.extra_usage.monthly_limit} ${usage.extra_usage.currency}`);
 }

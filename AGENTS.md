@@ -49,10 +49,8 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
 
 - Tier: `~/.claude/.credentials.json` (`claudeAiOauth.subscriptionType` /
   `rateLimitTier`), confirmed via `GET https://api.anthropic.com/api/oauth/profile`.
-- Limits: `GET https://api.anthropic.com/api/oauth/usage` returns `five_hour`,
-  `seven_day`, `seven_day_sonnet` (each `utilization` % + `resets_at`) and
-  `extra_usage`. Required headers: `Authorization: Bearer <token>`,
-  `anthropic-beta: oauth-2025-04-20`, `anthropic-version: 2023-06-01`.
+- Limits: `GET https://api.anthropic.com/api/oauth/usage` returns `five_hour` and `seven_day` (each `utilization` % + `resets_at`), plus `extra_usage`. Required headers: `Authorization: Bearer <token>`, `anthropic-beta: oauth-2025-04-20`, `anthropic-version: 2023-06-01`.
+- Model-scoped weekly windows (the plan's per-model slice, e.g. Fable) now arrive in the `limits` array as entries with `group: "weekly"`, `kind: "weekly_scoped"`, an integer `percent`, and `scope.model.display_name`. The old top-level `seven_day_<model>` keys are still in the payload but null; `scopedWindows()` in `extension.js` reads both shapes and dedupes by label. Run `gjs -m tools/poll.js` to see what the account actually reports.
 - Refresh: `POST https://platform.claude.com/v1/oauth/token` with
   `grant_type=refresh_token` and the public Claude Code `client_id`.
 

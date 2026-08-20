@@ -189,6 +189,37 @@ function modelLabel(name) {
         name.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
+// The scoped weekly windows (a single model getting its own slice of the plan,
+// e.g. Fable) shown alongside the overall 5-hour and 7-day bars.
+//
+// These used to arrive as top-level `seven_day_<name>` keys. Newer payloads
+// report them in the `limits` array as weekly entries carrying a model scope,
+// and leave the old keys present but null, so both shapes have to be read.
+// Returns a Map of stable key -> {label, win}, where `win` is shaped like a
+// usage window (`utilization` + `resets_at`) whatever it was parsed from.
+// Keying on the lowercased label means a model reported through both shapes
+// yields one meter, not two.
+function scopedWindows(usage) {
+    const out = new Map();
+    for (const key of Object.keys(usage)) {
+        const m = /^seven_day_(.+)$/.exec(key);
+        if (!m || !usage[key])
+            continue;
+        const label = modelLabel(m[1]);
+        out.set(label.toLowerCase(), {label, win: usage[key]});
+    }
+    for (const entry of usage.limits ?? []) {
+        const label = entry?.scope?.model?.display_name;
+        if (!label || entry.group !== 'weekly')
+            continue;
+        out.set(label.toLowerCase(), {
+            label,
+            win: {utilization: entry.percent, resets_at: entry.resets_at},
+        });
+    }
+    return out;
+}
+
 function relativeReset(iso) {
     const target = Date.parse(iso);
     if (Number.isNaN(target))
@@ -608,25 +639,20 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._bindWindow(this._fiveHour, usage.five_hour, FIVE_HOUR_SECONDS);
         this._bindWindow(this._sevenDay, usage.seven_day, SEVEN_DAY_SECONDS);
 
-        // Per-model 7-day windows arrive as seven_day_<name>; render one meter
-        // per non-null entry and drop any that the API stops reporting.
-        const seen = new Set();
-        for (const key of Object.keys(usage)) {
-            const m = /^seven_day_(.+)$/.exec(key);
-            const win = usage[key];
-            if (!m || !win)
-                continue;
-            seen.add(key);
+        // One meter per model-scoped weekly window, dropping any the API stops
+        // reporting.
+        const scoped = scopedWindows(usage);
+        for (const [key, {label, win}] of scoped) {
             let meter = this._perModelMeters.get(key);
             if (!meter) {
-                meter = new Meter(`7-day ${modelLabel(m[1])}`);
+                meter = new Meter(`7-day ${label}`);
                 this._perModelBox.add_child(meter.root);
                 this._perModelMeters.set(key, meter);
             }
             this._bindWindow(meter, win, SEVEN_DAY_SECONDS);
         }
         for (const [key, meter] of this._perModelMeters) {
-            if (!seen.has(key)) {
+            if (!scoped.has(key)) {
                 meter.destroy();
                 this._perModelMeters.delete(key);
             }
@@ -741,11 +767,18 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         case 'seven-day':
             return {win: u.seven_day, total: SEVEN_DAY_SECONDS};
         case 'max': {
-            const fu = u.five_hour?.utilization ?? -1;
-            const su = u.seven_day?.utilization ?? -1;
-            return su > fu
-                ? {win: u.seven_day, total: SEVEN_DAY_SECONDS}
-                : {win: u.five_hour, total: FIVE_HOUR_SECONDS};
+            // The most constraining window, which includes the model-scoped
+            // weekly ones: hitting the Fable ceiling stops work just as hard as
+            // hitting the overall one.
+            let best = {win: u.five_hour, total: FIVE_HOUR_SECONDS};
+            const consider = (win, total) => {
+                if ((win?.utilization ?? -1) > (best.win?.utilization ?? -1))
+                    best = {win, total};
+            };
+            consider(u.seven_day, SEVEN_DAY_SECONDS);
+            for (const {win} of scopedWindows(u).values())
+                consider(win, SEVEN_DAY_SECONDS);
+            return best;
         }
         case 'five-hour':
         default:
