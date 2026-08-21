@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 1.3.0 - 2026-08-21
+
+Thanks to @amalakhovsky, who contributed everything in this release: the
+dynamic `limits[]` rework and the 100% bar fill.
+
 ### Added
 - Per-model usage windows. Anthropic's usage endpoint now reports its windows in
   a self-describing `limits[]` array that includes model-scoped limits (e.g. a
