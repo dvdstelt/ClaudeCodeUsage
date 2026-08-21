@@ -13,7 +13,6 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {UsageClient, UsageError} from './lib/usageClient.js';
 
-const TRACK_WIDTH = 300;
 const USAGE_SETTINGS_URL = 'https://claude.ai/settings/usage';
 
 // Severity levels, least to most severe.
@@ -243,9 +242,15 @@ class Meter {
         row.add_child(this._name);
         row.add_child(this._pct);
 
-        this._track = new St.BoxLayout({style_class: 'cu-track'});
+        this._track = new St.BoxLayout({style_class: 'cu-track', x_expand: true});
         this._fill = new St.Widget({style_class: 'cu-fill cu-ok'});
         this._track.add_child(this._fill);
+        // The fill is sized as a fraction of the track's *actual* allocated
+        // width, recomputed whenever the track is (re)laid out. Sizing off a
+        // fixed pixel constant left a 100% bar short of the end whenever the
+        // popup stretched the track wider than that constant (issue #3).
+        this._fraction = 0;
+        this._track.connect('notify::width', () => this._resizeFill());
 
         this._caption = wrapLabel(new St.Label({text: '', style_class: 'cu-caption'}));
 
@@ -258,14 +263,25 @@ class Meter {
     // own level) drives the color, so projection can tint without resizing.
     setValue(util, caption, level = utilLevel(util)) {
         this._pct.text = `${Math.round(util)}%`;
-        this._fill.set_width(Math.round((Math.max(0, Math.min(100, util)) / 100) * TRACK_WIDTH));
+        this._fraction = Math.max(0, Math.min(100, util)) / 100;
+        this._resizeFill();
         this._fill.style_class = `cu-fill ${levelClass(level)}`;
         this._caption.text = caption ?? '';
         this._caption.visible = !!caption;
     }
 
+    // Size the fill to the current fraction of the track's real width, so a
+    // 100% window always reaches the end no matter how wide the popup lays the
+    // track out. Called on every value change and on every track re-allocation
+    // (the first allocation lands after construction, when width is still 0).
+    _resizeFill() {
+        const w = this._track?.get_width() ?? 0;
+        this._fill.set_width(Math.round(this._fraction * w));
+    }
+
     setMuted() {
         this._pct.text = '—';
+        this._fraction = 0;
         this._fill.set_width(0);
         this._caption.visible = false;
     }
