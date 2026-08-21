@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 1.2.0 - 2026-07-10
+
+### Fixed
+- Per-model weekly usage windows (for example Fable) show in the dropdown
+  again. The usage API moved them out of the top-level `seven_day_<model>`
+  fields and into its `limits` array; the extension now reads both shapes and
+  deduplicates by model, so accounts on either payload keep working.
+
+### Changed
+- The "most constrained" panel option now also weighs the model-scoped weekly
+  limits, so approaching a per-model ceiling shows in the panel just like the
+  overall 5-hour and 7-day windows.
+
 ## 1.1.2 - 2026-07-10
 
 ### Changed
