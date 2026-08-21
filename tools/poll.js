@@ -3,6 +3,7 @@
 //   gjs -m tools/poll.js   (run from the repository root)
 import GLib from 'gi://GLib';
 import {UsageClient} from '../src/lib/usageClient.js';
+import {normalizeWindows, normalizeSpend} from '../src/lib/usageModel.js';
 
 const loop = GLib.MainLoop.new(null, false);
 
@@ -18,16 +19,24 @@ async function run() {
     print('  rate tier:', profile.organization?.rate_limit_tier);
 
     const usage = await client.fetchUsage();
-    print('\nusage windows:');
-    for (const key of ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet']) {
-        const w = usage[key];
-        if (w)
-            print(`  ${key}: ${w.utilization}%  resets ${w.resets_at}`);
-        else
-            print(`  ${key}: (null)`);
+
+    // Raw top-level keys, so it is obvious which shape the API is returning.
+    print('\nraw usage keys:', Object.keys(usage).join(', '));
+    print(`  limits[]: ${Array.isArray(usage.limits) ? usage.limits.length : '(none)'} entr${usage.limits?.length === 1 ? 'y' : 'ies'}`);
+
+    // Normalised windows — exactly what the extension renders.
+    print('\nusage windows (normalised):');
+    for (const w of normalizeWindows(usage)) {
+        const active = w.isActive ? '  [active]' : '';
+        const sev = w.apiLevel !== 'ok' ? `  api:${w.apiLevel}` : '';
+        print(`  ${w.label}: ${Math.round(w.utilization)}%  resets ${w.resetsAt ?? '(n/a)'}${sev}${active}`);
     }
-    if (usage.extra_usage)
-        print(`  extra_usage: ${usage.extra_usage.used_credits}/${usage.extra_usage.monthly_limit} ${usage.extra_usage.currency}`);
+
+    const spend = normalizeSpend(usage);
+    if (spend) {
+        const pct = spend.percent !== null ? ` (${spend.percent}%)` : '';
+        print(`\nextra usage: ${[spend.used, spend.limit].filter(Boolean).join(' / ')}${pct}  [${spend.level}]`);
+    }
 }
 
 run()

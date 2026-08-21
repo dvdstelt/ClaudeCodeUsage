@@ -12,6 +12,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {UsageClient, UsageError} from './lib/usageClient.js';
+import {normalizeWindows, normalizeSpend} from './lib/usageModel.js';
 
 const USAGE_SETTINGS_URL = 'https://claude.ai/settings/usage';
 
@@ -57,9 +58,6 @@ function colorRgb(c) {
     const scale = Math.max(c.red, c.green, c.blue) > 1 ? 255 : 1;
     return [c.red / scale, c.green / scale, c.blue / scale];
 }
-
-const FIVE_HOUR_SECONDS = 5 * 3600;
-const SEVEN_DAY_SECONDS = 7 * 24 * 3600;
 
 // Collapse refreshes that land closer together than this. Opening the popup
 // triggers a refresh, and so does the poll timer; without a floor the two can
@@ -181,13 +179,6 @@ function tierLabel(subscriptionType, rateLimitTier) {
     return m ? `${base} ${m[1]}x` : base;
 }
 
-// Friendly name for a per-model usage window key suffix (seven_day_<name>).
-function modelLabel(name) {
-    const known = {opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', oauth_apps: 'OAuth Apps'};
-    return known[name] ??
-        name.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-}
-
 function relativeReset(iso) {
     const target = Date.parse(iso);
     if (Number.isNaN(target))
@@ -277,6 +268,12 @@ class Meter {
     _resizeFill() {
         const w = this._track?.get_width() ?? 0;
         this._fill.set_width(Math.round(this._fraction * w));
+    }
+
+    // Update the meter's title in place (a reused meter can change label, e.g.
+    // if the API renames a scoped window).
+    setName(name) {
+        this._name.text = name;
     }
 
     setMuted() {
@@ -405,7 +402,12 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._cancellable = new Gio.Cancellable();
         this._lastUsage = null;
         this._lastFetchMs = 0;
-        this._perModelMeters = new Map();
+        // key (from the usage model) -> Meter, so meters are reused across polls
+        // and torn down only when the API stops reporting that window.
+        this._meters = new Map();
+        // Normalised windows from the last render, cached for the panel selector
+        // and the between-poll countdown.
+        this._windows = [];
         this._meterBindings = [];
         this._countdownTimer = null;
 
@@ -506,15 +508,11 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         header.add_child(this._pill);
         root.add_child(header);
 
-        // limits section
+        // limits section — one meter per window the API reports (5-hour, 7-day,
+        // and any per-model windows like Fable), built dynamically on render.
         this._sectionLabel(root, 'Usage limits');
-        this._fiveHour = new Meter('5-hour window');
-        this._sevenDay = new Meter('7-day window');
-        root.add_child(this._fiveHour.root);
-        root.add_child(this._sevenDay.root);
-        // Per-model 7-day meters are added here on demand.
-        this._perModelBox = new St.BoxLayout({vertical: true});
-        root.add_child(this._perModelBox);
+        this._metersBox = new St.BoxLayout({vertical: true});
+        root.add_child(this._metersBox);
 
         this._extra = wrapLabel(new St.Label({text: '', style_class: 'cu-extra'}));
         root.add_child(this._extra);
@@ -618,56 +616,37 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             this._panelTier.text = this._pill.text.split(' ')[0];
         }
 
-        // Reset the binding list each render so the countdown re-applies from
-        // exactly the windows now on screen (per-model meters come and go).
+        // Build the meter list from the normalised windows. The model prefers
+        // the API's self-describing limits[] array (which now carries per-model
+        // windows like Fable) and falls back to the legacy flat keys.
+        this._windows = normalizeWindows(usage);
         this._meterBindings = [];
-        this._bindWindow(this._fiveHour, usage.five_hour, FIVE_HOUR_SECONDS);
-        this._bindWindow(this._sevenDay, usage.seven_day, SEVEN_DAY_SECONDS);
-
-        // Per-model 7-day windows arrive as seven_day_<name>; render one meter
-        // per non-null entry and drop any that the API stops reporting.
         const seen = new Set();
-        for (const key of Object.keys(usage)) {
-            const m = /^seven_day_(.+)$/.exec(key);
-            const win = usage[key];
-            if (!m || !win)
-                continue;
-            seen.add(key);
-            let meter = this._perModelMeters.get(key);
+        for (const w of this._windows) {
+            seen.add(w.key);
+            let meter = this._meters.get(w.key);
             if (!meter) {
-                meter = new Meter(`7-day ${modelLabel(m[1])}`);
-                this._perModelBox.add_child(meter.root);
-                this._perModelMeters.set(key, meter);
+                meter = new Meter(w.label);
+                this._metersBox.add_child(meter.root);
+                this._meters.set(w.key, meter);
+            } else {
+                meter.setName(w.label);
             }
-            this._bindWindow(meter, win, SEVEN_DAY_SECONDS);
+            this._bindWindow(meter, w);
         }
-        for (const [key, meter] of this._perModelMeters) {
+        // Keep the on-screen order matching the window order.
+        this._windows.forEach((w, i) => {
+            this._metersBox.set_child_at_index(this._meters.get(w.key).root, i);
+        });
+        // Drop meters for windows the API stopped reporting.
+        for (const [key, meter] of this._meters) {
             if (!seen.has(key)) {
                 meter.destroy();
-                this._perModelMeters.delete(key);
+                this._meters.delete(key);
             }
         }
 
-        const xu = usage.extra_usage;
-        if (xu && xu.is_enabled) {
-            const cur = xu.currency || '';
-            // NOTE: the units of used_credits and monthly_limit are not
-            // confirmed against a live extra_usage payload. We scale both the
-            // same way (treating them as minor units, e.g. cents) so the two
-            // numbers are at least consistent; the previous code scaled only
-            // monthly_limit, which could not be right for both. Verify against
-            // real data and adjust the divisor if needed.
-            const money = v => Number.isFinite(v) ? `${cur} ${(v / 100).toFixed(2)}`.trim() : null;
-            const used = money(Number(xu.used_credits));
-            const limit = money(Number(xu.monthly_limit));
-            const parts = [used ?? `${cur} 0.00`.trim()];
-            if (limit && Number(xu.monthly_limit) > 0)
-                parts.push(limit);
-            this._extra.visible = true;
-            this._extra.text = `Extra usage: ${parts.join(' / ')}`;
-        } else {
-            this._extra.visible = false;
-        }
+        this._renderSpend(usage);
 
         this._renderPanel();
         this._scheduleCountdown();
@@ -676,20 +655,39 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._updated.text = `Updated ${now.format('%H:%M:%S')}`;
     }
 
-    // Pairs a meter with its window so the live countdown can re-render the
-    // caption between polls without another network round-trip.
-    _bindWindow(meter, win, total) {
-        this._meterBindings.push({meter, win, total});
-        this._applyWindow(meter, win, total);
+    // Renders the "extra usage" line from the normalised spend block (the new
+    // structured `spend` object, or the legacy `extra_usage` fallback), colour-
+    // ing it by the API's severity.
+    _renderSpend(usage) {
+        const spend = normalizeSpend(usage);
+        if (!spend) {
+            this._extra.visible = false;
+            this._extra.style_class = 'cu-extra';
+            return;
+        }
+        const parts = [spend.used, spend.limit].filter(Boolean);
+        let text = `Extra usage: ${parts.join(' / ')}`;
+        if (spend.percent !== null)
+            text += ` (${spend.percent}%)`;
+        this._extra.text = text;
+        this._extra.style_class = `cu-extra ${levelClass(spend.level)}`;
+        this._extra.visible = true;
+    }
+
+    // Pairs a meter with its normalised window so the live countdown can
+    // re-render the caption between polls without another network round-trip.
+    _bindWindow(meter, w) {
+        this._meterBindings.push({meter, w});
+        this._applyWindow(meter, w);
     }
 
     // Soonest reset across all on-screen windows, in seconds, or null if none.
     _soonestResetSeconds() {
         let soonest = null;
-        for (const {win} of this._meterBindings) {
-            if (!win?.resets_at)
+        for (const {w} of this._meterBindings) {
+            if (!w?.resetsAt)
                 continue;
-            const t = Date.parse(win.resets_at);
+            const t = Date.parse(w.resetsAt);
             if (Number.isNaN(t))
                 continue;
             const rem = (t - Date.now()) / 1000;
@@ -722,56 +720,74 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     _refreshCountdowns() {
         if (!this._lastUsage)
             return;
-        for (const {meter, win, total} of this._meterBindings)
-            this._applyWindow(meter, win, total);
+        for (const {meter, w} of this._meterBindings)
+            this._applyWindow(meter, w);
         this._renderPanel();
     }
 
-    // Renders a meter from a usage window. The color reflects the consequence
-    // of the current burn (see windowLevel): red only when you're out of
-    // headroom now or would be locked out for a meaningful stretch; amber for a
-    // near-reset overrun or a rising trend. The caption explains it in words.
-    _applyWindow(meter, win, totalSeconds) {
-        if (!win) {
+    // Renders a meter from a normalised usage window. The color reflects the
+    // consequence of the current burn (see windowLevel): red only when you're
+    // out of headroom now or would be locked out for a meaningful stretch;
+    // amber for a near-reset overrun or a rising trend. It is floored at the
+    // API's own severity, so a window the API flags as warning/critical never
+    // reads calmer than the API says. The caption explains it in words.
+    _applyWindow(meter, w) {
+        if (!w || !Number.isFinite(w.utilization)) {
             meter.setMuted();
             return;
         }
-        const util = win.utilization;
-        const level = windowLevel(util, win.resets_at, totalSeconds);
-        let caption = win.resets_at ? relativeReset(win.resets_at)
+        const util = w.utilization;
+        const level = maxLevel(windowLevel(util, w.resetsAt, w.totalSeconds), w.apiLevel);
+        let caption = w.resetsAt ? relativeReset(w.resetsAt)
             : (util > 0 ? '' : 'not used yet');
 
-        const note = projectionNote(util, win.resets_at, totalSeconds);
+        const note = projectionNote(util, w.resetsAt, w.totalSeconds);
         if (note)
             caption = caption ? `${caption} · ${note}` : note;
 
         meter.setValue(util, caption, level);
     }
 
-    // Which usage window the panel reflects, per the panel-window preference.
+    // Final level for a normalised window: the computed burn consequence,
+    // floored at the API's severity.
+    _windowLevel(w) {
+        return maxLevel(windowLevel(w.utilization, w.resetsAt, w.totalSeconds), w.apiLevel);
+    }
+
+    // The worst window to surface in the panel: the highest severity among the
+    // active limits (or all of them if none are marked active), breaking ties by
+    // utilization. This is how a 100% scoped window (e.g. Fable) reaches the bar
+    // even when the session and weekly totals are calm.
+    _worstWindow(windows) {
+        const active = windows.filter(w => w.isActive);
+        const pool = active.length ? active : windows;
+        const score = w => LEVEL_RANK[this._windowLevel(w)] * 1000 + (Number(w.utilization) || 0);
+        return pool.reduce((best, w) => (score(w) > score(best) ? w : best));
+    }
+
+    // Which normalised usage window the panel reflects, per the panel-window
+    // preference.
     _panelWindow() {
-        const u = this._lastUsage;
-        if (!u)
+        const windows = this._windows;
+        if (!windows || !windows.length)
             return null;
         switch (this._settings.get_string('panel-window')) {
         case 'seven-day':
-            return {win: u.seven_day, total: SEVEN_DAY_SECONDS};
-        case 'max': {
-            const fu = u.five_hour?.utilization ?? -1;
-            const su = u.seven_day?.utilization ?? -1;
-            return su > fu
-                ? {win: u.seven_day, total: SEVEN_DAY_SECONDS}
-                : {win: u.five_hour, total: FIVE_HOUR_SECONDS};
-        }
+            return windows.find(w => w.role === 'weekly') ?? windows[0];
+        case 'worst':
+            return this._worstWindow(windows);
+        case 'max':
+            return windows.reduce((best, w) =>
+                (Number(w.utilization) || 0) > (Number(best.utilization) || 0) ? w : best);
         case 'five-hour':
         default:
-            return {win: u.five_hour, total: FIVE_HOUR_SECONDS};
+            return windows.find(w => w.role === 'session') ?? windows[0];
         }
     }
 
     _renderPanel() {
         const sel = this._panelWindow();
-        if (!sel || !sel.win) {
+        if (!sel || !Number.isFinite(sel.utilization)) {
             this._panelPct.text = '—';
             this._panelPct.style_class = 'cu-panel-pct';
             this._ring.setUnknown();
@@ -779,11 +795,11 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             this._panelReset.text = '';
             return;
         }
-        const util = sel.win.utilization;
-        const level = windowLevel(util, sel.win.resets_at, sel.total);
+        const util = sel.utilization;
+        const level = this._windowLevel(sel);
         this._panelPct.text = `${Math.round(util)}%`;
         this._panelPct.style_class = `cu-panel-pct ${levelClass(level)}`;
-        this._panelReset.text = sel.win.resets_at ? compactReset(sel.win.resets_at) : '';
+        this._panelReset.text = sel.resetsAt ? compactReset(sel.resetsAt) : '';
         this._ring.setValue(util, level);
         this._panelBar.setValue(util, level);
     }
@@ -838,18 +854,15 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         // Tear down the gauge/meter helpers and release their references; the
         // actors themselves also go with super.destroy(), but releasing here
         // keeps ownership explicit.
-        this._fiveHour?.destroy();
-        this._sevenDay?.destroy();
-        for (const meter of this._perModelMeters.values())
+        for (const meter of this._meters.values())
             meter.destroy();
-        this._perModelMeters.clear();
+        this._meters.clear();
         this._panelBar?.destroy();
-        this._fiveHour = null;
-        this._sevenDay = null;
         this._panelBar = null;
         this._ring = null;
         this._panelReset = null;
         this._meterBindings = [];
+        this._windows = [];
         this._lastUsage = null;
         this._client = null;
 

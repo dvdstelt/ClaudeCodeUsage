@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- Per-model usage windows. Anthropic's usage endpoint now reports its windows in
+  a self-describing `limits[]` array that includes model-scoped limits (e.g. a
+  weekly Fable window). The popup renders one meter per reported window
+  dynamically, so any current or future model the API breaks out shows up
+  automatically instead of being silently dropped.
+- A "Worst active limit" option for *Panel reflects*, so the top-bar gauge can
+  surface whichever limit is most severe right now — a maxed-out per-model
+  window reaches the panel even when the 5-hour and 7-day totals are calm.
+
+### Changed
+- Gauge colors are now floored at the severity the API reports for each window:
+  the existing burn-consequence coloring still applies, but a window the API
+  flags as warning/critical never reads calmer than that.
+- The extra-usage line now uses the structured `spend` object (authoritative
+  amount, limit, percentage, and severity) when present, falling back to the
+  older `extra_usage` field — and scales it by the API's own decimal places
+  instead of assuming cents. It tints amber/red with the spend severity.
+
 ### Fixed
 - The popup usage bars now fill completely at 100%. The fill was sized from a
   fixed pixel constant while the track stretches to the popup's width, so a
