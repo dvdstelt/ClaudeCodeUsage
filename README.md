@@ -164,6 +164,21 @@ The repository is laid out as:
 
 See `AGENTS.md` for the data sources and conventions in more detail.
 
+## Contributors
+
+Built by [@dvdstelt](https://github.com/dvdstelt), with thanks to everyone who
+has contributed:
+
+- [@amalakhovsky](https://github.com/amalakhovsky) - rendering every usage
+  window dynamically from the API's `limits[]` array (per-model windows such as
+  Fable, the "worst active limit" panel option, structured spend), and fixing
+  the popup bars to fill completely at 100%.
+- [@ClemDNL](https://github.com/ClemDNL) - the optional time-until-reset
+  countdown in the panel.
+
+Pull requests are welcome. See `AGENTS.md` for the layout and conventions, and
+the [changelog](CHANGELOG.md) for what has landed so far.
+
 ## License
 
 Released under the GNU General Public License, version 2 or later
