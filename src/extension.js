@@ -735,20 +735,47 @@ class ProfileView {
         logError(e, `claude-usage: refresh failed for "${this.profile.label}"`);
     }
 
+    // Destroys every widget this view owns, leaf-first, then releases the
+    // references. The children would go with their containers anyway, but the
+    // store's review tooling matches each `this._x = new St.…` against a
+    // corresponding `this._x.destroy()` and cannot infer cascading, so each one
+    // is destroyed explicitly.
     destroy() {
         for (const meter of this._meters.values())
             meter.destroy();
         this._meters.clear();
+
+        // Panel block contents, then the block itself.
+        this._ring?.destroy();
         this._panelBar?.destroy();
         this._chip?.destroy();
+        this._panelPct?.destroy();
+        this._panelReset?.destroy();
+        this._panelTier?.destroy();
         this._panelSep?.destroy();
         this._panelBlock?.destroy();
+
+        // Popup section contents, then the section itself.
+        this._label?.destroy();
+        this._subtitle?.destroy();
+        this._pill?.destroy();
+        this._updated?.destroy();
+        this._metersBox?.destroy();
         this._section?.destroy();
-        this._panelBar = null;
+
         this._ring = null;
+        this._panelBar = null;
+        this._chip = null;
+        this._panelPct = null;
         this._panelReset = null;
+        this._panelTier = null;
         this._panelSep = null;
         this._panelBlock = null;
+        this._label = null;
+        this._subtitle = null;
+        this._pill = null;
+        this._updated = null;
+        this._metersBox = null;
         this._section = null;
         this._meterBindings = [];
         this._windows = [];
@@ -892,7 +919,10 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         });
         const refreshLabel = this._profileViews?.length > 1 ? '↻ Refresh all' : '↻ Refresh';
         this._refreshBtn = new St.Button({label: refreshLabel, style_class: 'cu-refresh', x_expand: true});
-        this._refreshBtn.connect('clicked', () => this._refresh(true));
+        // connectObject so destroy() can drop this with disconnectObject(this);
+        // a bare connect() on a this._* field is flagged by the store's review
+        // tooling as a signal that is never disconnected.
+        this._refreshBtn.connectObject('clicked', () => this._refresh(true), this);
         footer.add_child(settingsBtn);
         footer.add_child(this._refreshBtn);
         root.add_child(footer);
@@ -992,7 +1022,19 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._settings.disconnectObject(this);
         this._settings = null;
 
+        this._refreshBtn?.disconnectObject(this);
+        this._refreshBtn?.destroy();
+        this._refreshBtn = null;
+        this._panelIcon?.destroy();
+        this._panelIcon = null;
+
         this._destroyProfileViews();
+
+        // Destroyed after the profile views, which live inside these boxes.
+        this._panelBox?.destroy();
+        this._panelBox = null;
+        this._sectionsBox?.destroy();
+        this._sectionsBox = null;
 
         super.destroy();
     }
