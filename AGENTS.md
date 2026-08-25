@@ -28,7 +28,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
 - `src/schemas/` — GSettings schema (`org.gnome.shell.extensions.claude-usage`).
   Keys: `show-icon`/`show-percentage`/`show-tier`/`show-reset` (bool),
   `panel-gauge` (`ring`|`bar`|`none`),
-  `panel-window` (`five-hour`|`seven-day`|`max`), `poll-seconds` (30-600),
+  `panel-window` (`five-hour`|`seven-day`|`max`|`worst`), `poll-seconds` (30-600),
   `profiles` (JSON string, array of `{id, label, configDir}`),
   `profiles-initialized` (bool, set once auto-detection has seeded `profiles`
   so a deliberately-emptied list isn't re-seeded), and the in-app sign-in
@@ -96,9 +96,34 @@ These are undocumented internal endpoints and may change without notice.
 ## Conventions
 
 - All file I/O must stay cheap and non-blocking; never parse large transcripts on
-  the shell main loop (it janks the compositor). Network calls use libsoup async.
-- Keep `src/lib/usageClient.js` free of `resource:///org/gnome/shell` imports so
-  it stays runnable under plain `gjs` (it is also imported by `prefs.js`).
+  the shell main loop (it janks the compositor). Network calls use libsoup async,
+  and file reads/writes use the `_async` GIO variants — the review tooling
+  rejects synchronous `load_contents()` / `replace_contents()` in shell code.
+- Keep `src/lib/usageClient.js` and `src/lib/usageModel.js` free of
+  `resource:///org/gnome/shell` imports so they stay runnable under plain `gjs`
+  (both are also imported by `prefs.js` or the tools).
+
+### Teardown rules
+
+extensions.gnome.org runs a static analysis (Shexli) on every upload, and it
+checks these mechanically. Getting them wrong fails review, so:
+
+- **Connect signals with `connectObject(..., this)`, never a bare `connect()`**,
+  and drop them with a single `disconnectObject(this)` during teardown. A raw
+  `connect()` stored on a `this.*` field with no matching disconnect is flagged
+  (EGO-L-003). Disconnect *before* destroying the actors, so nothing fires
+  mid-teardown.
+- **Destroy every object you create, explicitly.** Call `.destroy()` on each
+  child widget (leaf-first, then the container) rather than relying on the
+  parent to cascade — the analyser matches each `this._x = new St.…` against a
+  corresponding `this._x.destroy()` and cannot infer cascading (EGO-L-002).
+- **Null the references afterwards** (`this._x = null`), and null the indicator
+  in `disable()` (EGO-L-005). Prefer this over a `this._destroyed` flag; guard
+  late async callbacks with a `Gio.Cancellable` that teardown cancels.
+
+Helper classes that own widgets (`Meter`, `PanelBar`) therefore each expose a
+`destroy()` that follows all three rules; call it from the indicator's
+`destroy()`.
 
 ## Install (development)
 
