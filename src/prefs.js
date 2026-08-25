@@ -124,7 +124,8 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         windows.append('5-hour window');
         windows.append('7-day window');
         windows.append('Most constrained');
-        const windowKeys = ['five-hour', 'seven-day', 'max'];
+        windows.append('Worst active limit');
+        const windowKeys = ['five-hour', 'seven-day', 'max', 'worst'];
 
         const windowRow = new Adw.ComboRow({
             title: 'Panel reflects',

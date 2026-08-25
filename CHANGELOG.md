@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## 1.2.0 - 2026-08-03
+## 1.4.0 - 2026-08-25
 
 ### Added
 - Support for multiple Claude Code profiles (separate `CLAUDE_CONFIG_DIR`
@@ -20,6 +20,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - GNOME Shell 46 and 47 are now supported (previously 48-50 only), covering
   Ubuntu 24.04 LTS.
+
+## 1.3.0 - 2026-08-21
+
+Thanks to @amalakhovsky, who contributed everything in this release: the
+dynamic `limits[]` rework and the 100% bar fill.
+
+### Added
+- Per-model usage windows. Anthropic's usage endpoint now reports its windows in
+  a self-describing `limits[]` array that includes model-scoped limits (e.g. a
+  weekly Fable window). The popup renders one meter per reported window
+  dynamically, so any current or future model the API breaks out shows up
+  automatically instead of being silently dropped.
+- A "Worst active limit" option for *Panel reflects*, so the top-bar gauge can
+  surface whichever limit is most severe right now — a maxed-out per-model
+  window reaches the panel even when the 5-hour and 7-day totals are calm.
+
+### Changed
+- Gauge colors are now floored at the severity the API reports for each window:
+  the existing burn-consequence coloring still applies, but a window the API
+  flags as warning/critical never reads calmer than that.
+- The extra-usage line now uses the structured `spend` object (authoritative
+  amount, limit, percentage, and severity) when present, falling back to the
+  older `extra_usage` field — and scales it by the API's own decimal places
+  instead of assuming cents. It tints amber/red with the spend severity.
+
+### Fixed
+- The popup usage bars now fill completely at 100%. The fill was sized from a
+  fixed pixel constant while the track stretches to the popup's width, so a
+  maxed-out window stopped a few pixels short of the end; the fill is now sized
+  as a fraction of the track's actual width and always reaches the end.
 
 ## 1.1.2 - 2026-07-10
 

@@ -52,6 +52,11 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
 - `src/lib/oauth.js` — shared OAuth/API constants (client id, endpoints,
   scopes, headers) and text codecs, imported by both `usageClient.js` and
   `prefs.js` so the values are defined once. No shell imports.
+- `src/lib/usageModel.js` — pure data-shaping: turns the usage payload into the
+  ordered list of windows the popup renders (`normalizeWindows`, preferring the
+  self-describing `limits[]` array and falling back to the legacy flat keys) and
+  the extra-usage money block (`normalizeSpend`). No GI or shell imports, so it
+  is unit-testable under plain `node` (see `tools/test-usageModel.mjs`).
 - `src/stylesheet.css` — `cu-*` classes for the indicator and popup.
 - `src/icons/` — panel icon (`claude-spark.svg`) and popup logo
   (`octopus.png`).
@@ -60,18 +65,29 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   `dist/<uuid>.shell-extension.zip`. Accepts an optional `-major`/`-minor`/
   `-patch` flag that bumps `version-name` (semver) in `metadata.json` and
   increments the integer `version` before packing.
-- `tools/poll.js` — standalone validator, run from the repo root:
-  `gjs -m tools/poll.js` (defaults to `~/.claude`) or
-  `gjs -m tools/poll.js ~/.claude-work` to check a specific profile.
+- `tools/poll.js` — standalone validator that hits the live API and prints the
+  normalised windows + spend, run from the repo root: `gjs -m tools/poll.js`
+  (defaults to `~/.claude`) or `gjs -m tools/poll.js ~/.claude-work` to check a
+  specific profile.
+- `tools/test-usageModel.mjs` — pure-`node` unit tests for `usageModel.js`
+  (no network, no GI): `node tools/test-usageModel.mjs`.
 
 ## Data sources
 
 - Tier: `~/.claude/.credentials.json` (`claudeAiOauth.subscriptionType` /
   `rateLimitTier`), confirmed via `GET https://api.anthropic.com/api/oauth/profile`.
-- Limits: `GET https://api.anthropic.com/api/oauth/usage` returns `five_hour`,
-  `seven_day`, `seven_day_sonnet` (each `utilization` % + `resets_at`) and
-  `extra_usage`. Required headers: `Authorization: Bearer <token>`,
-  `anthropic-beta: oauth-2025-04-20`, `anthropic-version: 2023-06-01`.
+- Limits: `GET https://api.anthropic.com/api/oauth/usage`. The current shape is
+  a self-describing `limits[]` array — each entry has `kind`
+  (`session`/`weekly_all`/`weekly_scoped`), `group` (`session`/`weekly`),
+  `percent`, `severity` (`normal`/`warning`/`critical`), `resets_at`,
+  `is_active`, and an optional `scope.model.display_name` naming a per-model
+  window (e.g. Fable). Money now comes as a structured `spend` object
+  (`used`/`limit` as `{amount_minor, currency, exponent}` + `percent` +
+  `severity`). The older flat keys (`five_hour`, `seven_day`,
+  `seven_day_<model>` with `utilization` %, plus `extra_usage`) are still parsed
+  as a fallback in `usageModel.js`. Required headers:
+  `Authorization: Bearer <token>`, `anthropic-beta: oauth-2025-04-20`,
+  `anthropic-version: 2023-06-01`.
 - Refresh: `POST https://platform.claude.com/v1/oauth/token` with
   `grant_type=refresh_token` and the public Claude Code `client_id`.
 
