@@ -241,7 +241,9 @@ class Meter {
         // fixed pixel constant left a 100% bar short of the end whenever the
         // popup stretched the track wider than that constant (issue #3).
         this._fraction = 0;
-        this._track.connect('notify::width', () => this._resizeFill());
+        // connectObject ties the handler to this meter, so destroy() can drop
+        // it with a single disconnectObject(this).
+        this._track.connectObject('notify::width', () => this._resizeFill(), this);
 
         this._caption = wrapLabel(new St.Label({text: '', style_class: 'cu-caption'}));
 
@@ -287,6 +289,9 @@ class Meter {
     // Each child is destroyed explicitly (leaf-first) so the destruction is
     // unambiguous to both the runtime and static review tooling.
     destroy() {
+        // Drop the track's notify::width handler before tearing the actors
+        // down, so nothing can fire mid-destruction.
+        this._track?.disconnectObject(this);
         this._name?.destroy();
         this._pct?.destroy();
         this._fill?.destroy();
