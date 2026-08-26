@@ -419,9 +419,6 @@ class ProfileView {
     constructor(profile, settings, panelBox, sectionsBox, showChip, isFirst, allowSharedToken, path) {
         this.profile = profile;
         this._settings = settings;
-        // Whether a chip is possible at all (more than one profile); the
-        // show-profile-chip setting then decides if it is actually shown.
-        this._chipAllowed = showChip;
         this._client = new UsageClient({configDir: profile.configDir, settings, allowSharedToken, profileId: profile.id});
         this._lastUsage = null;
         // Outcome of this profile's last refresh ('ok' | 'error' | 'signed-out'),
@@ -512,10 +509,10 @@ class ProfileView {
         this._panelPct.visible = this._settings.get_boolean('show-percentage');
         this._panelTier.visible = this._settings.get_boolean('show-tier');
         this._panelReset.visible = this._settings.get_boolean('show-reset');
-        // The chip only exists with more than one profile, and is then
+        // The chip is only built with more than one profile, and is then
         // toggleable — some people would rather not spend the panel width.
         if (this._chip)
-            this._chip.visible = this._chipAllowed && this._settings.get_boolean('show-profile-chip');
+            this._chip.visible = this._settings.get_boolean('show-profile-chip');
     }
 
     async applyTierFromDisk(cancellable) {

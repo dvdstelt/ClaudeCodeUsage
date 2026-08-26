@@ -250,6 +250,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
                 // Drop the profile's stored sign-in too, so a removed account's
                 // tokens don't linger in settings.
                 clearToken(settings, profile.id);
+                Gio.Settings.sync();
                 persist(loadProfiles(settings).filter(x => x.id !== profile.id));
             });
             removeRow.add_suffix(removeBtn);
@@ -484,6 +485,11 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
                         refreshToken: resp.refresh_token ?? '',
                         expiresAt: Date.now() + (resp.expires_in ?? DEFAULT_EXPIRES_IN) * 1000,
                     });
+                    // prefs is short-lived and may exit as soon as the window
+                    // closes; force the token to disk rather than trusting the
+                    // backend's async flush, or a sign-in done just before
+                    // closing is silently lost.
+                    Gio.Settings.sync();
                     setStatus('Connected', true);
                     codeRow.set_visible(false);
                     disconnectRow.set_visible(true);
@@ -500,6 +506,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
 
         disconnectButton.connect('clicked', () => {
             clearToken(settings, profile.id);
+            Gio.Settings.sync();
             codeRow.set_visible(false);
             codeVerifier = null;
             oauthState = null;

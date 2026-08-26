@@ -133,8 +133,9 @@ export class UsageError extends Error {
     }
 }
 
-// A profile has no usable credentials of its own and isn't allowed to borrow
-// the shared in-app token. The caller renders a "signed out" state, not an error.
+// A profile has no usable credentials: no Claude Code login in its directory
+// and no in-app sign-in of its own. The caller renders a muted "signed out"
+// state rather than an error, since nothing actually went wrong.
 export class SignedOutError extends UsageError {
     constructor(message = 'Not signed in for this profile.') {
         super(message);
@@ -145,13 +146,13 @@ export class SignedOutError extends UsageError {
 
 export class UsageClient {
     // configDir is the Claude Code config directory to read/write credentials
-    // in (defaults to ~/.claude). settings is optional; when provided it
-    // supplies the extension's own OAuth tokens (from the in-app sign-in) as a
-    // fallback for profiles without usable on-disk credentials.
+    // in (defaults to ~/.claude). profileId selects this profile's own in-app
+    // sign-in from tokenStore.js, used when the on-disk credentials are missing
+    // or dead; a profile that has never signed in resolves to a SignedOutError.
     //
-    // allowSharedToken gates that fallback: the in-app token is a single shared
-    // credential, so only the profile it can belong to may use it (see the
-    // caller). Other profiles resolve to a SignedOutError instead.
+    // allowSharedToken no longer gates everyday use — tokens are per profile —
+    // and only decides which single profile may claim a pre-per-profile sign-in
+    // when migrating it (see _storedToken).
     constructor({configDir = defaultConfigDir(), settings = null, allowSharedToken = true, profileId = null} = {}) {
         this._configDir = configDir;
         this._settings = settings;
@@ -294,7 +295,7 @@ export class UsageClient {
     async _settingsToken() {
         const stored = this._storedToken();
         if (!stored)
-            throw new SignedOutError('No Claude Code login found in this profile\u2019s directory.');
+            throw new SignedOutError('Not signed in. Use Connect in this profile\u2019s settings, or sign in with Claude Code.');
         if (stored.expiresAt && stored.expiresAt - Date.now() > REFRESH_SKEW_MS)
             return stored.accessToken;
         return this._refreshSettingsToken();
