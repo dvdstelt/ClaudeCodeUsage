@@ -132,14 +132,29 @@ export class UsageError extends Error {
     }
 }
 
+// A profile has no usable credentials of its own and isn't allowed to borrow
+// the shared in-app token. The caller renders a "signed out" state, not an error.
+export class SignedOutError extends UsageError {
+    constructor(message = 'Not signed in for this profile.') {
+        super(message);
+        this.name = 'SignedOutError';
+        this.signedOut = true;
+    }
+}
+
 export class UsageClient {
     // configDir is the Claude Code config directory to read/write credentials
     // in (defaults to ~/.claude). settings is optional; when provided it
     // supplies the extension's own OAuth tokens (from the in-app sign-in) as a
     // fallback for profiles without usable on-disk credentials.
-    constructor({configDir = defaultConfigDir(), settings = null} = {}) {
+    //
+    // allowSharedToken gates that fallback: the in-app token is a single shared
+    // credential, so only the profile it can belong to may use it (see the
+    // caller). Other profiles resolve to a SignedOutError instead.
+    constructor({configDir = defaultConfigDir(), settings = null, allowSharedToken = true} = {}) {
         this._configDir = configDir;
         this._settings = settings;
+        this._allowSharedToken = allowSharedToken;
         this._session = new Soup.Session();
         this._session.timeout = 15;
         // Shared in-flight token resolution; see _validToken().
@@ -296,14 +311,16 @@ export class UsageClient {
             } catch (e) {
                 // Claude Code's credentials are dead (e.g. its refresh token
                 // expired, which happens when the CLI is unused and only Claude
-                // Desktop is signed in). Fall back to the extension's own in-app
-                // token if the user has signed in; otherwise surface the error.
-                if (this._settings?.get_string('access-token'))
+                // Desktop is signed in). Fall back to the in-app token only if
+                // this profile may use it; otherwise surface the error.
+                if (this._allowSharedToken && this._settings?.get_string('access-token'))
                     return this._settingsToken();
                 throw e;
             }
         }
-        return this._settingsToken();
+        if (this._allowSharedToken)
+            return this._settingsToken();
+        throw new SignedOutError('No Claude Code login found in this profile’s directory.');
     }
 
     async fetchUsage(cancellable = null) {

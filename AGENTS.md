@@ -36,10 +36,14 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   Recompile after edits: `glib-compile-schemas src/schemas/`.
 - `src/lib/usageClient.js` — pure GI module: resolves a token for a given
   `configDir` (that profile's on-disk credentials first, the extension's own
-  GSettings tokens second — shared across profiles, since only one in-app
-  sign-in is supported), calls the usage and profile endpoints, refreshes the
+  GSettings tokens second), calls the usage and profile endpoints, refreshes the
   token when near expiry, and writes it back to whichever store it came from.
-  Exports `claudeCodeCredentialsAvailable(configDir)`, `defaultConfigDir()`
+  Only one in-app sign-in is supported, so the `allowSharedToken` option gates
+  the fallback to that token to just the profile it can belong to (the sole
+  profile, or the one owning `~/.claude` — decided in `extension.js`); any other
+  profile without on-disk credentials resolves to a `SignedOutError` that the
+  panel shows as a muted "Signed out" state. Exports
+  `claudeCodeCredentialsAvailable(configDir)`, `defaultConfigDir()`
   (`~/.claude`), and `discoverConfigDirs()` (finds `~/.claude` and sibling
   `~/.claude-*` directories that already hold credentials). Soup is pinned
   inline via `gi://Soup?version=3.0` (some systems still ship the 2.4
