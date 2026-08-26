@@ -139,6 +139,8 @@
     color: #ff9c8a;
     margin: 4px 0;
 }
+/* Signed-out note: same slot as an error, but muted — it's a state, not a fault. */
+.cu-error.cu-dim { color: rgba(128, 128, 128, 1.0); }
 
 /* ===== actions ===== */
 .cu-actions {

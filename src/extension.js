@@ -11,7 +11,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-import {UsageClient, UsageError} from './lib/usageClient.js';
+import {UsageClient, UsageError, SignedOutError, defaultConfigDir} from './lib/usageClient.js';
 import {loadProfiles, ensureProfiles} from './lib/profiles.js';
 import {normalizeWindows, normalizeSpend} from './lib/usageModel.js';
 
@@ -173,10 +173,16 @@ function projectionNote(util, resetsAtIso, totalSeconds) {
     return '';
 }
 
-function tierLabel(subscriptionType, rateLimitTier) {
-    const base = subscriptionType === 'max' ? 'MAX'
-        : subscriptionType === 'pro' ? 'PRO'
-        : (subscriptionType ?? '').toUpperCase() || 'CLAUDE';
+// Plan label for the pill: the API's raw token (`subscriptionType` from disk or
+// `organization_type` from the profile), prefix-stripped and cased — nothing
+// mapped by name, so new plans show through. "CLAUDE" only if the API said
+// nothing. A multiplier in the rate-limit tier ("…_20x") is appended.
+function tierLabel(plan, rateLimitTier) {
+    const base = String(plan ?? '')
+        .replace(/^claude[_-]/i, '')
+        .replace(/[_-]+/g, ' ')
+        .trim()
+        .toUpperCase() || 'CLAUDE';
     const m = /(\d+)x/.exec(rateLimitTier ?? '');
     return m ? `${base} ${m[1]}x` : base;
 }
@@ -410,10 +416,10 @@ class PanelBar {
 // instances are orchestrated by ClaudeUsageIndicator, which shares a single
 // panel icon, poll timer, and countdown across all of them.
 class ProfileView {
-    constructor(profile, settings, panelBox, sectionsBox, showChip, isFirst) {
+    constructor(profile, settings, panelBox, sectionsBox, showChip, isFirst, allowSharedToken) {
         this.profile = profile;
         this._settings = settings;
-        this._client = new UsageClient({configDir: profile.configDir, settings});
+        this._client = new UsageClient({configDir: profile.configDir, settings, allowSharedToken});
         this._lastUsage = null;
         // Normalised windows from the last render, cached for the panel
         // selector and the between-poll countdown.
@@ -463,6 +469,8 @@ class ProfileView {
         who.add_child(this._label);
         who.add_child(this._subtitle);
         this._pill = new St.Label({text: '', style_class: 'cu-pill', y_align: Clutter.ActorAlign.CENTER});
+        // An empty pill still paints as a coloured dot; only show it with a tier.
+        this._pill.visible = false;
         header.add_child(who);
         header.add_child(this._pill);
         this._section.add_child(header);
@@ -499,8 +507,13 @@ class ProfileView {
             const {subscriptionType, rateLimitTier} = await this._client.tierFromDisk();
             if (cancellable.is_cancelled())
                 return;
+            // No credentials on disk: leave the tier blank rather than flash a
+            // generic "CLAUDE"; the refresh fills in the real state shortly.
+            if (!subscriptionType && !rateLimitTier)
+                return;
             const label = tierLabel(subscriptionType, rateLimitTier);
             this._pill.text = label;
+            this._pill.visible = true;
             this._panelTier.text = label.split(' ')[0];
         } catch {
             // Not signed in yet; the refresh will surface a clearer message.
@@ -532,9 +545,13 @@ class ProfileView {
         if (profile?.account) {
             const sub = profile.application?.name ?? 'Claude';
             this._subtitle.text = profile.organization?.subscription_status === 'active' ? `${sub} · active` : sub;
-            this._pill.text = tierLabel(
-                profile.account.has_claude_max ? 'max' : profile.account.has_claude_pro ? 'pro' : '',
-                profile.organization?.rate_limit_tier);
+            // Org plan is authoritative and always present; the has_claude_*
+            // booleans are only a fallback (both false for team/enterprise seats).
+            const plan = profile.organization?.organization_type
+                ?? (profile.account.has_claude_max ? 'max'
+                    : profile.account.has_claude_pro ? 'pro' : null);
+            this._pill.text = tierLabel(plan, profile.organization?.rate_limit_tier);
+            this._pill.visible = true;
             this._panelTier.text = this._pill.text.split(' ')[0];
         }
 
@@ -711,6 +728,11 @@ class ProfileView {
         // profiles are being rebuilt); nothing to show.
         if (e instanceof GLib.Error && e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
             return;
+        // This profile has no login of its own: a state, not a failure.
+        if (e instanceof SignedOutError) {
+            this._renderSignedOut(e);
+            return;
+        }
         // A 429 is transient (we polled a touch too soon). If we already have
         // usage on screen, keep showing it instead of flashing an error.
         if (e instanceof UsageError && e.status === 429 && this._lastUsage) {
@@ -730,9 +752,39 @@ class ProfileView {
         else
             msg = e.message || 'Could not reach Claude';
         this._error.text = msg;
+        this._error.style_class = 'cu-error';
         this._error.visible = true;
         this._updated.text = 'Update failed';
         logError(e, `claude-usage: refresh failed for "${this.profile.label}"`);
+    }
+
+    // Clear any stale usage and show a muted "signed out" line. The account
+    // just needs signing in (via Claude Code, or the in-app sign-in).
+    _renderSignedOut(e) {
+        for (const meter of this._meters.values())
+            meter.destroy();
+        this._meters.clear();
+        this._meterBindings = [];
+        this._windows = [];
+        this._lastUsage = null;
+
+        this._subtitle.text = 'Signed out';
+        this._pill.text = '';
+        this._pill.visible = false;
+        this._panelTier.text = '';
+        this._extra.visible = false;
+
+        this._panelPct.text = '—';
+        this._panelPct.style_class = 'cu-panel-pct';
+        this._ring.setUnknown();
+        this._panelBar.setUnknown();
+        this._panelReset.text = '';
+
+        this._error.text = e.message;
+        this._error.style_class = 'cu-error cu-dim';
+        this._error.visible = true;
+        // Nothing to timestamp; the subtitle and note already say "signed out".
+        this._updated.text = '';
     }
 
     // Destroys every widget this view owns, leaf-first, then releases the
@@ -857,8 +909,15 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
     _buildProfileViews(profiles) {
         this._destroyProfileViews();
         const showChip = profiles.length > 1;
-        this._profileViews = profiles.map((profile, i) =>
-            new ProfileView(profile, this._settings, this._panelBox, this._sectionsBox, showChip, i === 0));
+        // Only the profile the single in-app token can belong to may fall back
+        // to it: the sole profile, or the one owning the default ~/.claude dir.
+        const defaultDir = Gio.File.new_for_path(defaultConfigDir());
+        this._profileViews = profiles.map((profile, i) => {
+            const ownsDefaultDir = Gio.File.new_for_path(profile.configDir).equal(defaultDir);
+            const allowSharedToken = profiles.length === 1 || ownsDefaultDir;
+            return new ProfileView(profile, this._settings, this._panelBox,
+                this._sectionsBox, showChip, i === 0, allowSharedToken);
+        });
         this._applyVisibility();
         for (const view of this._profileViews)
             view.applyTierFromDisk(this._cancellable);
