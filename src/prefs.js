@@ -173,7 +173,8 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
     }
 
     // Adds a "Claude profiles" group: one expandable row per configured
-    // profile (name, config folder, remove), plus an "Add profile" row. Each
+    // profile (name, config folder, its own sign-in, and — only when another
+    // profile would remain — remove), plus an "Add profile" row. Each
     // profile is just a Claude Code config directory (the CLAUDE_CONFIG_DIR
     // convention for running multiple accounts on one machine); the extension
     // shows every configured profile side by side and refreshes them together.
@@ -191,8 +192,12 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         const rerender = () => {
             for (const row of rows)
                 group.remove(row);
-            // Profile rows first, "Add profile" always last.
-            rows = loadProfiles(settings).map(buildProfileRow);
+            // Profile rows first, "Add profile" always last. Removal is only
+            // offered when another profile would remain: with a single profile
+            // there is nothing to fall back to, and deleting it by accident
+            // leaves an empty panel that is fiddly to recover from.
+            const profiles = loadProfiles(settings);
+            rows = profiles.map(p => buildProfileRow(p, profiles.length > 1));
             rows.push(buildAddRow());
         };
 
@@ -201,7 +206,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
             rerender();
         };
 
-        const buildProfileRow = profile => {
+        const buildProfileRow = (profile, canRemove) => {
             const row = new Adw.ExpanderRow({title: profile.label, subtitle: profile.configDir});
             group.add(row);
 
@@ -233,6 +238,9 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
             row.add_row(folderRow);
 
             this._addSignInRows(row, settings, profile);
+
+            if (!canRemove)
+                return row;
 
             const removeRow = new Adw.ActionRow({title: 'Remove this profile'});
             const removeBtn = new Gtk.Button({
