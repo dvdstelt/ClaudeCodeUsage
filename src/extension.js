@@ -4,6 +4,8 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Pango from 'gi://Pango';
+import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 import Cairo from 'cairo';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -1133,11 +1135,47 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
 export default class ClaudeUsageExtension extends Extension {
     enable() {
-        this._indicator = new ClaudeUsageIndicator(this.path, this.getSettings(), () => this.openPreferences());
-        Main.panel.addToStatusArea(this.uuid, this._indicator);
+        this._settings = this.getSettings();
+        this._indicator = new ClaudeUsageIndicator(
+            this.path, this._settings, () => this.openPreferences());
+        // Watch both placement keys so a move applies immediately, with no
+        // reload and no logging out.
+        this._settings.connectObject(
+            'changed::panel-position', () => this._place(),
+            'changed::panel-index', () => this._place(),
+            this);
+        this._place();
+
+        // Optional shortcut that opens the popup, the same as clicking the
+        // indicator — the shell binds its own panel menus this way (Super+S
+        // for quick settings). Unbound by default, so nothing is taken from
+        // the user until they choose a combination. Meta follows the GSettings
+        // key itself, so changing the shortcut needs no extra plumbing.
+        Main.wm.addKeybinding(
+            'toggle-menu',
+            this._settings,
+            Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
+            () => this._indicator?.menu.toggle());
+    }
+
+    // Puts the indicator in the configured panel box. addToStatusArea refuses a
+    // role that is already registered, so the registration is cleared first;
+    // the indicator itself is reused, so moving it costs no refetch and leaves
+    // the poll timer and current readings alone.
+    _place() {
+        if (Main.panel.statusArea[this.uuid])
+            Main.panel.statusArea[this.uuid] = null;
+        Main.panel.addToStatusArea(
+            this.uuid, this._indicator,
+            this._settings.get_int('panel-index'),
+            this._settings.get_string('panel-position'));
     }
 
     disable() {
+        Main.wm.removeKeybinding('toggle-menu');
+        this._settings?.disconnectObject(this);
+        this._settings = null;
         this._indicator?.destroy();
         this._indicator = null;
     }

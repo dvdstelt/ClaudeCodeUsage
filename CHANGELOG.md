@@ -20,6 +20,17 @@ Thanks to @rafi0x for the multiple-profile support.
   group in preferences.
 - A profile whose config directory has no Claude Code login is now shown as
   signed out, instead of silently displaying another account's usage.
+- Each profile can sign in to its own Claude account, from its own row in
+  preferences, so a second account no longer needs the Claude Code CLI. Tokens
+  are kept per profile, and an existing single sign-in is carried over on
+  upgrade rather than being lost.
+- The indicator can be placed in any section of the top bar - left, center, or
+  right - and positioned among the other items there, without needing a
+  separate panel-organiser extension (#1).
+- An optional keyboard shortcut opens the usage popup, the way `Super+S` opens
+  GNOME's quick settings. Not set by default (#13).
+- A "Profile tag" toggle hides the short two-letter tag shown before each
+  profile's gauge, for anyone who would rather keep the panel narrow.
 
 ### Changed
 - GNOME Shell 46 and 47 are now supported (previously 48-50 only), covering
@@ -29,6 +40,13 @@ Thanks to @rafi0x for the multiple-profile support.
   header shows the profile's own label.
 - The subscription pill follows the plan the API reports rather than a fixed
   list, so team and enterprise seats are labelled correctly.
+- Each profile has its own header in the popup - its own logo and the name you
+  gave it - instead of one static heading above the list. With a single profile
+  the popup reads the way it did before profiles existed.
+- The "Updated" time sits once at the bottom of the popup instead of being
+  repeated in every profile section, since all profiles refresh together.
+- "Remove this profile" is only offered when another profile would remain, so
+  the last one cannot be deleted by accident.
 
 ## 1.3.0 - 2026-08-21
 

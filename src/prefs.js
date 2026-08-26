@@ -1,5 +1,6 @@
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Soup from 'gi://Soup?version=3.0';
@@ -150,6 +151,36 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         });
         behaviour.add(windowRow);
 
+        const positions = new Gtk.StringList();
+        positions.append('Left');
+        positions.append('Center');
+        positions.append('Right');
+        const positionKeys = ['left', 'center', 'right'];
+
+        const positionRow = new Adw.ComboRow({
+            title: 'Panel position',
+            subtitle: 'Which section of the top bar the indicator sits in.',
+            model: positions,
+        });
+        positionRow.selected = Math.max(0, positionKeys.indexOf(settings.get_string('panel-position')));
+        positionRow.connect('notify::selected', () => {
+            settings.set_string('panel-position', positionKeys[positionRow.selected]);
+        });
+        settings.connect('changed::panel-position', () => {
+            positionRow.selected = Math.max(0, positionKeys.indexOf(settings.get_string('panel-position')));
+        });
+        behaviour.add(positionRow);
+
+        const indexRow = new Adw.SpinRow({
+            title: 'Position in that section',
+            subtitle: 'Raise this to move the indicator further along; 0 puts it first.',
+            adjustment: new Gtk.Adjustment({lower: 0, upper: 20, step_increment: 1, page_increment: 5}),
+        });
+        behaviour.add(indexRow);
+        settings.bind('panel-index', indexRow, 'value', Gio.SettingsBindFlags.DEFAULT);
+
+        behaviour.add(this._buildShortcutRow(settings, window));
+
         const interval = new Adw.SpinRow({
             title: 'Refresh interval',
             subtitle: 'Seconds between usage updates.',
@@ -292,6 +323,100 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
 
     // Adds a centered footer crediting the author, linking to the project for
     // bug reports and feature requests, and showing the version.
+    // A row showing the current shortcut for opening the popup, which opens a
+    // small capture dialog when activated. The key is an "as" array, matching
+    // how the shell stores its own keybindings.
+    _buildShortcutRow(settings, window) {
+        const row = new Adw.ActionRow({
+            title: 'Shortcut to open the popup',
+            subtitle: 'Opens the usage dropdown without the mouse. Not set by default.',
+            activatable: true,
+        });
+
+        const label = new Gtk.ShortcutLabel({
+            disabled_text: 'Not set',
+            valign: Gtk.Align.CENTER,
+        });
+        const syncLabel = () => {
+            label.set_accelerator(settings.get_strv('toggle-menu')[0] ?? '');
+        };
+        syncLabel();
+        settings.connect('changed::toggle-menu', syncLabel);
+        row.add_suffix(label);
+
+        const clear = new Gtk.Button({
+            icon_name: 'edit-clear-symbolic',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['flat'],
+            tooltip_text: 'Clear the shortcut',
+        });
+        clear.connect('clicked', () => settings.set_strv('toggle-menu', []));
+        row.add_suffix(clear);
+
+        row.connect('activated', () => this._captureShortcut(settings, window));
+        return row;
+    }
+
+    // Modal that grabs the next key combination. Escape cancels, Backspace
+    // clears, and a bare key without modifiers is ignored — otherwise typing a
+    // letter would steal it system-wide.
+    _captureShortcut(settings, window) {
+        const dialog = new Adw.Window({
+            modal: true,
+            transient_for: window,
+            default_width: 380,
+            default_height: 180,
+            title: 'Set shortcut',
+        });
+
+        const view = new Adw.ToolbarView();
+        view.add_top_bar(new Adw.HeaderBar({show_end_title_buttons: false, show_start_title_buttons: false}));
+        const box = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            valign: Gtk.Align.CENTER,
+            spacing: 8,
+            margin_start: 24, margin_end: 24, margin_top: 12, margin_bottom: 24,
+        });
+        box.append(new Gtk.Label({
+            label: 'Press the key combination you want to use.',
+            wrap: true,
+        }));
+        box.append(new Gtk.Label({
+            label: 'Esc to cancel, Backspace to clear.',
+            wrap: true,
+            css_classes: ['dim-label'],
+        }));
+        view.set_content(box);
+        dialog.set_content(view);
+
+        const controller = new Gtk.EventControllerKey({propagation_phase: Gtk.PropagationPhase.CAPTURE});
+        controller.connect('key-pressed', (_c, keyval, keycode, state) => {
+            const mask = state & Gtk.accelerator_get_default_mod_mask();
+
+            if (keyval === Gdk.KEY_Escape && !mask) {
+                dialog.close();
+                return Gdk.EVENT_STOP;
+            }
+            if (keyval === Gdk.KEY_BackSpace && !mask) {
+                settings.set_strv('toggle-menu', []);
+                dialog.close();
+                return Gdk.EVENT_STOP;
+            }
+            // A modifier on its own, or a plain unmodified key, is not a usable
+            // global shortcut; keep waiting instead of storing something that
+            // would swallow ordinary typing.
+            if (!mask || !Gtk.accelerator_valid(keyval, mask))
+                return Gdk.EVENT_STOP;
+
+            const accel = Gtk.accelerator_name_with_keycode(null, keyval, keycode, mask);
+            settings.set_strv('toggle-menu', [accel]);
+            dialog.close();
+            return Gdk.EVENT_STOP;
+        });
+        dialog.add_controller(controller);
+        dialog.present();
+    }
+
     _addAboutGroup(page) {
         const footer = new Adw.PreferencesGroup();
         page.add(footer);
