@@ -40,6 +40,23 @@
     color: rgba(128, 128, 128, 1.0);
     font-weight: bold;
 }
+.cu-panel-block {
+    spacing: 5px;
+}
+.cu-panel-sep {
+    width: 1px;
+    height: 14px;
+    margin: 0 6px;
+    background-color: rgba(128, 128, 128, 0.35);
+}
+.cu-panel-chip {
+    font-size: 8pt;
+    font-weight: bold;
+    color: rgba(128, 128, 128, 1.0);
+    padding: 1px 4px;
+    border-radius: 4px;
+    background-color: rgba(128, 128, 128, 0.18);
+}
 
 /* ===== popup ===== */
 .cu-popup {
@@ -75,6 +92,20 @@
     margin: 10px 0 8px 0;
 }
 
+/* ===== per-profile sections ===== */
+.cu-profile-section {
+    margin-bottom: 2px;
+}
+.cu-profile-section-divider {
+    border-top: 1px solid rgba(128, 128, 128, 0.25);
+    padding-top: 12px;
+    margin-top: 10px;
+}
+.cu-profile-header {
+    spacing: 8px;
+    margin-bottom: 10px;
+}
+
 /* ===== meters ===== */
 .cu-meter { spacing: 5px; margin-bottom: 11px; }
 .cu-meter-row { spacing: 8px; }
@@ -108,6 +139,8 @@
     color: #ff9c8a;
     margin: 4px 0;
 }
+/* Signed-out note: same slot as an error, but muted — it's a state, not a fault. */
+.cu-error.cu-dim { color: rgba(128, 128, 128, 1.0); }
 
 /* ===== actions ===== */
 .cu-actions {
@@ -140,12 +173,13 @@
     padding-top: 9px;
     border-top: 1px solid rgba(128, 128, 128, 0.25);
 }
-.cu-updated { font-size: 9pt; color: rgba(128, 128, 128, 1.0); }
+.cu-updated { font-size: 9pt; color: rgba(128, 128, 128, 1.0); margin-top: 6px; }
 .cu-refresh {
     font-size: 9pt;
     font-weight: bold;
     color: #62a0ea;
-    padding: 2px 6px;
+    padding: 4px 6px;
     border-radius: 6px;
+    text-align: center;
 }
 .cu-refresh:hover { background-color: rgba(128, 128, 128, 0.20); }

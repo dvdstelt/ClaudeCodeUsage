@@ -11,6 +11,11 @@ import {
     AUTHORIZE_URL, TOKEN_URL, CLIENT_ID, REDIRECT_URI, OAUTH_SCOPES,
     DEFAULT_EXPIRES_IN, encoder, decoder,
 } from './lib/oauth.js';
+import {loadProfiles, saveProfiles, makeProfileId, labelForDirName, ensureProfiles} from './lib/profiles.js';
+
+// Gtk.FileDialog predates GJS's automatic async/finish pairing for this
+// class on some GNOME versions, so promisify it explicitly.
+Gio._promisify(Gtk.FileDialog.prototype, 'select_folder', 'select_folder_finish');
 
 // URL-safe base64 without padding, as required by PKCE.
 function base64url(bytes) {
@@ -33,6 +38,26 @@ function codeChallenge(verifier) {
     for (let i = 0; i < 32; i++)
         raw[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
     return base64url(raw);
+}
+
+// Opens a native folder picker rooted at initialPath; returns the chosen path,
+// or null if the user cancelled (or the dialog failed for any reason - not
+// worth surfacing, the user can just try again).
+async function pickFolder(window, initialPath) {
+    const dialog = new Gtk.FileDialog({title: 'Select a Claude Code config folder'});
+    if (initialPath) {
+        try {
+            dialog.set_initial_folder(Gio.File.new_for_path(initialPath));
+        } catch {
+            // Best-effort; the dialog falls back to its own default location.
+        }
+    }
+    try {
+        const folder = await dialog.select_folder(window, null);
+        return folder.get_path();
+    } catch {
+        return null;
+    }
 }
 
 export default class ClaudeUsagePreferences extends ExtensionPreferences {
@@ -129,14 +154,125 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         behaviour.add(interval);
         settings.bind('poll-seconds', interval, 'value', Gio.SettingsBindFlags.DEFAULT);
 
-        // ---- sign-in (only when Claude Code can't supply a token) ----
-        // If Claude Code is signed in, the extension rides on its credentials
-        // and there's nothing for the user to do here, so the whole group is
-        // omitted rather than shown disabled.
-        if (!(await claudeCodeCredentialsAvailable()))
+        // ---- profiles (one per Claude Code account / config directory) ----
+        await this._addProfilesGroup(page, settings, window);
+
+        // ---- sign-in (only when no profile can supply a Claude Code token) ----
+        // If any profile is signed in via Claude Code, the extension rides on
+        // its credentials and there's nothing to do here for that account, so
+        // the whole group is omitted rather than shown disabled. It reappears
+        // once every profile's on-disk token has expired.
+        const profiles = await ensureProfiles(settings);
+        const anyCredentialed = (await Promise.all(
+            profiles.map(p => claudeCodeCredentialsAvailable(p.configDir)))).some(Boolean);
+        if (!anyCredentialed)
             this._addAuthGroup(page, settings);
 
         this._addAboutGroup(page);
+    }
+
+    // Adds a "Claude profiles" group: one expandable row per configured
+    // profile (name, config folder, remove), plus an "Add profile" row. Each
+    // profile is just a Claude Code config directory (the CLAUDE_CONFIG_DIR
+    // convention for running multiple accounts on one machine); the extension
+    // shows every configured profile side by side and refreshes them together.
+    async _addProfilesGroup(page, settings, window) {
+        const group = new Adw.PreferencesGroup({
+            title: 'Claude profiles',
+            description: 'One row per Claude Code account. A profile is a config ' +
+                'directory such as ~/.claude or ~/.claude-work (the one you get by ' +
+                'running CLAUDE_CONFIG_DIR=~/.claude-work claude). Add one for each ' +
+                'account you want visible - and refreshed - at the same time.',
+        });
+        page.add(group);
+
+        let rows = [];
+        const rerender = () => {
+            for (const row of rows)
+                group.remove(row);
+            // Profile rows first, "Add profile" always last.
+            rows = loadProfiles(settings).map(buildProfileRow);
+            rows.push(buildAddRow());
+        };
+
+        const persist = profiles => {
+            saveProfiles(settings, profiles);
+            rerender();
+        };
+
+        const buildProfileRow = profile => {
+            const row = new Adw.ExpanderRow({title: profile.label, subtitle: profile.configDir});
+            group.add(row);
+
+            const nameRow = new Adw.EntryRow({title: 'Name', text: profile.label, show_apply_button: true});
+            nameRow.connect('apply', () => {
+                const profiles = loadProfiles(settings);
+                const p = profiles.find(x => x.id === profile.id);
+                if (p) {
+                    p.label = nameRow.get_text().trim() || p.label;
+                    persist(profiles);
+                }
+            });
+            row.add_row(nameRow);
+
+            const folderRow = new Adw.ActionRow({title: 'Config folder', subtitle: profile.configDir});
+            const changeBtn = new Gtk.Button({label: 'Change…', valign: Gtk.Align.CENTER});
+            changeBtn.connect('clicked', async () => {
+                const dir = await pickFolder(window, profile.configDir);
+                if (!dir)
+                    return;
+                const profiles = loadProfiles(settings);
+                const p = profiles.find(x => x.id === profile.id);
+                if (p) {
+                    p.configDir = dir;
+                    persist(profiles);
+                }
+            });
+            folderRow.add_suffix(changeBtn);
+            row.add_row(folderRow);
+
+            const removeRow = new Adw.ActionRow({title: 'Remove this profile'});
+            const removeBtn = new Gtk.Button({
+                label: 'Remove', valign: Gtk.Align.CENTER, css_classes: ['destructive-action'],
+            });
+            removeBtn.connect('clicked', () => {
+                persist(loadProfiles(settings).filter(x => x.id !== profile.id));
+            });
+            removeRow.add_suffix(removeBtn);
+            row.add_row(removeRow);
+
+            return row;
+        };
+
+        const buildAddRow = () => {
+            const row = new Adw.ActionRow({
+                title: 'Add profile',
+                subtitle: 'Point at another Claude Code config directory',
+            });
+            const addBtn = new Gtk.Button({
+                label: 'Add…', valign: Gtk.Align.CENTER, css_classes: ['suggested-action'],
+            });
+            addBtn.connect('clicked', async () => {
+                const dir = await pickFolder(window, GLib.get_home_dir());
+                if (!dir)
+                    return;
+                const profiles = loadProfiles(settings);
+                if (profiles.some(p => p.configDir === dir))
+                    return;
+                profiles.push({
+                    id: makeProfileId(),
+                    label: labelForDirName(GLib.path_get_basename(dir)),
+                    configDir: dir,
+                });
+                persist(profiles);
+            });
+            row.add_suffix(addBtn);
+            group.add(row);
+            return row;
+        };
+
+        await ensureProfiles(settings);
+        rerender();
     }
 
     // Adds a centered footer crediting the author, linking to the project for

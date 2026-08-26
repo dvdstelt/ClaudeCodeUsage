@@ -12,25 +12,47 @@ The shipped extension lives in `src/`; everything else (this file, the README,
 the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
 
 - `src/extension.js` — panel indicator + dropdown UI (ESM, GNOME Shell 45+
-  style). The panel shows a Claude icon, a Cairo-drawn usage ring, a percentage,
-  an optional time-until-reset countdown, and a tier label; each is
-  independently toggleable via GSettings.
+  style). `ProfileView` holds everything specific to one Claude Code profile
+  (its `UsageClient`, panel block, and popup section); `ClaudeUsageIndicator`
+  owns one `ProfileView` per configured profile, plus the shared panel icon,
+  poll timer, and countdown. The panel shows a Claude icon once, then one
+  block per profile (ring/bar, percentage, reset countdown, tier label), each
+  independently toggleable via GSettings (the toggles apply to every profile
+  uniformly). A small chip (e.g. "TE") tags each panel block only when more
+  than one profile is configured.
 - `src/prefs.js` — Adwaita preferences (element toggles, panel window, refresh
-  interval), bound to GSettings. Also hosts the fallback PKCE sign-in flow,
-  shown only when `claudeCodeCredentialsAvailable()` is false.
+  interval, the "Claude profiles" list), bound to GSettings. Also hosts the
+  fallback PKCE sign-in flow, shown only when no configured profile has usable
+  on-disk credentials (`claudeCodeCredentialsAvailable(configDir)` for every
+  profile).
 - `src/schemas/` — GSettings schema (`org.gnome.shell.extensions.claude-usage`).
   Keys: `show-icon`/`show-percentage`/`show-tier`/`show-reset` (bool),
   `panel-gauge` (`ring`|`bar`|`none`),
   `panel-window` (`five-hour`|`seven-day`|`max`|`worst`), `poll-seconds` (30-600),
-  and the in-app sign-in tokens `access-token`/`refresh-token` (string) +
-  `expires-at` (int64 ms). Recompile after edits:
-  `glib-compile-schemas src/schemas/`.
-- `src/lib/usageClient.js` — pure GI module: resolves a token (Claude Code's
-  on-disk credentials first, the extension's own GSettings tokens second),
-  calls the usage and profile endpoints, refreshes the token when near expiry,
-  and writes it back to whichever store it came from. Exports
-  `claudeCodeCredentialsAvailable()` for prefs. Soup is pinned inline via
-  `gi://Soup?version=3.0` (some systems still ship the 2.4 typelib).
+  `profiles` (JSON string, array of `{id, label, configDir}`),
+  `profiles-initialized` (bool, set once auto-detection has seeded `profiles`
+  so a deliberately-emptied list isn't re-seeded), and the in-app sign-in
+  tokens `access-token`/`refresh-token` (string) + `expires-at` (int64 ms).
+  Recompile after edits: `glib-compile-schemas src/schemas/`.
+- `src/lib/usageClient.js` — pure GI module: resolves a token for a given
+  `configDir` (that profile's on-disk credentials first, the extension's own
+  GSettings tokens second), calls the usage and profile endpoints, refreshes the
+  token when near expiry, and writes it back to whichever store it came from.
+  Only one in-app sign-in is supported, so the `allowSharedToken` option gates
+  the fallback to that token to just the profile it can belong to (the sole
+  profile, or the one owning `~/.claude` — decided in `extension.js`); any other
+  profile without on-disk credentials resolves to a `SignedOutError` that the
+  panel shows as a muted "Signed out" state. Exports
+  `claudeCodeCredentialsAvailable(configDir)`, `defaultConfigDir()`
+  (`~/.claude`), and `discoverConfigDirs()` (finds `~/.claude` and sibling
+  `~/.claude-*` directories that already hold credentials). Soup is pinned
+  inline via `gi://Soup?version=3.0` (some systems still ship the 2.4
+  typelib).
+- `src/lib/profiles.js` — the profile list: `loadProfiles`/`saveProfiles`
+  (JSON in the `profiles` GSettings key) and `ensureProfiles` (seeds the list
+  from `discoverConfigDirs()` once, gated by `profiles-initialized`). Kept
+  shell-import-free like `usageClient.js` so prefs and plain `gjs` can use it
+  too.
 - `src/lib/oauth.js` — shared OAuth/API constants (client id, endpoints,
   scopes, headers) and text codecs, imported by both `usageClient.js` and
   `prefs.js` so the values are defined once. No shell imports.
@@ -48,7 +70,9 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   `-patch` flag that bumps `version-name` (semver) in `metadata.json` and
   increments the integer `version` before packing.
 - `tools/poll.js` — standalone validator that hits the live API and prints the
-  normalised windows + spend, run from the repo root: `gjs -m tools/poll.js`.
+  normalised windows + spend, run from the repo root: `gjs -m tools/poll.js`
+  (defaults to `~/.claude`) or `gjs -m tools/poll.js ~/.claude-work` to check a
+  specific profile.
 - `tools/test-usageModel.mjs` — pure-`node` unit tests for `usageModel.js`
   (no network, no GI): `node tools/test-usageModel.mjs`.
 
