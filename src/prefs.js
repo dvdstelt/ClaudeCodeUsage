@@ -15,6 +15,8 @@ import {
 import {loadProfiles, saveProfiles, makeProfileId, labelForDirName, ensureProfiles} from './lib/profiles.js';
 import {getToken, setToken, clearToken} from './lib/tokenStore.js';
 
+const KOFI_URL = 'https://ko-fi.com/dvdstelt';
+
 // Gtk.FileDialog predates GJS's automatic async/finish pairing for this
 // class on some GNOME versions, so promisify it explicitly.
 Gio._promisify(Gtk.FileDialog.prototype, 'select_folder', 'select_folder_finish');
@@ -429,6 +431,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
             margin_bottom: 16,
             halign: Gtk.Align.CENTER,
         });
+        buttons.append(this._buildLinkButton('♥ Buy me a coffee', KOFI_URL));
         buttons.append(this._buildLinkButton('Report a bug', issuesUrl));
         buttons.append(this._buildLinkButton('Request a feature', issuesUrl));
         footer.add(buttons);

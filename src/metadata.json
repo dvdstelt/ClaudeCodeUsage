@@ -6,6 +6,7 @@
   "url": "https://github.com/dvdstelt/ClaudeCodeUsage",
   "settings-schema": "org.gnome.shell.extensions.claude-usage",
   "donations": {
+    "kofi": "dvdstelt",
     "paypal": "dvdstelt"
   },
   "version": 12,
