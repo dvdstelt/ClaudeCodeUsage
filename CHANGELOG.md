@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## 1.4.0 - 2026-08-25
+## 1.4.0 - 2026-08-26
+
+Thanks to @rafi0x for the multiple-profile support.
 
 ### Added
 - Support for multiple Claude Code profiles (separate `CLAUDE_CONFIG_DIR`
@@ -16,10 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a single "Refresh all" action. Profiles are auto-detected on first run and
   can be renamed, repointed, added, or removed from a new "Claude profiles"
   group in preferences.
+- A profile whose config directory has no Claude Code login is now shown as
+  signed out, instead of silently displaying another account's usage.
 
 ### Changed
 - GNOME Shell 46 and 47 are now supported (previously 48-50 only), covering
   Ubuntu 24.04 LTS.
+- The account name now appears in each profile's subtitle (for example
+  "Dennis · Claude Code · active"), so it stays visible now that the popup
+  header shows the profile's own label.
+- The subscription pill follows the plan the API reports rather than a fixed
+  list, so team and enterprise seats are labelled correctly.
 
 ## 1.3.0 - 2026-08-21
 
