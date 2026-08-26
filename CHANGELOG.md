@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 1.4.1 - 2026-08-26
+
+### Added
+- A "Buy me a coffee" button in the preferences footer, next to Report a bug
+  and Request a feature, and a ko-fi link on the extension's page alongside the
+  existing PayPal one.
+
 ## 1.4.0 - 2026-08-26
 
 Thanks to @rafi0x for the multiple-profile support.
