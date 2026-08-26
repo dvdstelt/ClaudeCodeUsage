@@ -531,7 +531,13 @@ class ProfileView {
 
         if (profile?.account) {
             const sub = profile.application?.name ?? 'Claude';
-            this._subtitle.text = profile.organization?.subscription_status === 'active' ? `${sub} · active` : sub;
+            const status = profile.organization?.subscription_status === 'active' ? `${sub} · active` : sub;
+            // The section title is the profile's own label, so fold the account
+            // identity into the subtitle instead of dropping it — otherwise a
+            // single-profile user loses the display name the header used to
+            // show, and it stays useful for telling profiles apart.
+            const who = profile.account.display_name || profile.account.full_name || '';
+            this._subtitle.text = who ? `${who} · ${status}` : status;
             this._pill.text = tierLabel(
                 profile.account.has_claude_max ? 'max' : profile.account.has_claude_pro ? 'pro' : '',
                 profile.organization?.rate_limit_tier);
