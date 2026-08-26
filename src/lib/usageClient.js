@@ -5,6 +5,7 @@ import Gio from 'gi://Gio';
 // Soup) could pick the wrong one.
 import Soup from 'gi://Soup?version=3.0';
 
+import {getToken, setToken, migrateLegacyToken} from './tokenStore.js';
 import {
     USAGE_URL, PROFILE_URL, TOKEN_URL, CLIENT_ID,
     BETA_HEADER, API_VERSION, DEFAULT_EXPIRES_IN,
@@ -132,8 +133,9 @@ export class UsageError extends Error {
     }
 }
 
-// A profile has no usable credentials of its own and isn't allowed to borrow
-// the shared in-app token. The caller renders a "signed out" state, not an error.
+// A profile has no usable credentials: no Claude Code login in its directory
+// and no in-app sign-in of its own. The caller renders a muted "signed out"
+// state rather than an error, since nothing actually went wrong.
 export class SignedOutError extends UsageError {
     constructor(message = 'Not signed in for this profile.') {
         super(message);
@@ -144,17 +146,20 @@ export class SignedOutError extends UsageError {
 
 export class UsageClient {
     // configDir is the Claude Code config directory to read/write credentials
-    // in (defaults to ~/.claude). settings is optional; when provided it
-    // supplies the extension's own OAuth tokens (from the in-app sign-in) as a
-    // fallback for profiles without usable on-disk credentials.
+    // in (defaults to ~/.claude). profileId selects this profile's own in-app
+    // sign-in from tokenStore.js, used when the on-disk credentials are missing
+    // or dead; a profile that has never signed in resolves to a SignedOutError.
     //
-    // allowSharedToken gates that fallback: the in-app token is a single shared
-    // credential, so only the profile it can belong to may use it (see the
-    // caller). Other profiles resolve to a SignedOutError instead.
-    constructor({configDir = defaultConfigDir(), settings = null, allowSharedToken = true} = {}) {
+    // allowSharedToken no longer gates everyday use — tokens are per profile —
+    // and only decides which single profile may claim a pre-per-profile sign-in
+    // when migrating it (see _storedToken).
+    constructor({configDir = defaultConfigDir(), settings = null, allowSharedToken = true, profileId = null} = {}) {
         this._configDir = configDir;
         this._settings = settings;
         this._allowSharedToken = allowSharedToken;
+        // Which profile's in-app sign-in to use. Each profile signs in to its
+        // own account, so tokens are looked up by id rather than shared.
+        this._profileId = profileId;
         this._session = new Soup.Session();
         this._session.timeout = 15;
         // Shared in-flight token resolution; see _validToken().
@@ -256,27 +261,43 @@ export class UsageClient {
     }
 
     // Refreshes the extension's own tokens, persisting them back to GSettings.
+    // This profile's stored in-app tokens, migrating a pre-existing global
+    // sign-in onto it the first time (so upgrading doesn't sign anyone out).
+    _storedToken() {
+        if (!this._settings || !this._profileId)
+            return null;
+        const own = getToken(this._settings, this._profileId);
+        if (own)
+            return own;
+        // Upgrade path only: the pre-per-profile single sign-in belongs to
+        // whichever profile could legitimately have been using it, so just that
+        // one may claim it. Otherwise two profiles would race for the same
+        // token on first refresh.
+        return this._allowSharedToken
+            ? migrateLegacyToken(this._settings, this._profileId)
+            : null;
+    }
+
     async _refreshSettingsToken() {
-        const refreshToken = this._settings?.get_string('refresh-token');
-        if (!refreshToken)
+        const stored = this._storedToken();
+        if (!stored?.refreshToken)
             throw new UsageError('Not connected; sign in from extension settings');
-        const data = await this._exchangeRefreshToken(refreshToken);
-        this._settings.set_string('access-token', data.access_token);
-        if (data.refresh_token)
-            this._settings.set_string('refresh-token', data.refresh_token);
-        this._settings.set_int64('expires-at',
-            Date.now() + (data.expires_in ?? DEFAULT_EXPIRES_IN) * 1000);
+        const data = await this._exchangeRefreshToken(stored.refreshToken);
+        setToken(this._settings, this._profileId, {
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token || stored.refreshToken,
+            expiresAt: Date.now() + (data.expires_in ?? DEFAULT_EXPIRES_IN) * 1000,
+        });
         return data.access_token;
     }
 
     // The extension's own access token, refreshing when close to expiry.
     async _settingsToken() {
-        const token = this._settings?.get_string('access-token');
-        if (!token)
-            throw new UsageError('No Claude OAuth token found; sign in with Claude Code or from extension settings');
-        const expiresAt = Number(this._settings.get_int64('expires-at')) || 0;
-        if (expiresAt && expiresAt - Date.now() > REFRESH_SKEW_MS)
-            return token;
+        const stored = this._storedToken();
+        if (!stored)
+            throw new SignedOutError('Not signed in. Use Connect in this profile\u2019s settings, or sign in with Claude Code.');
+        if (stored.expiresAt && stored.expiresAt - Date.now() > REFRESH_SKEW_MS)
+            return stored.accessToken;
         return this._refreshSettingsToken();
     }
 
@@ -311,16 +332,16 @@ export class UsageClient {
             } catch (e) {
                 // Claude Code's credentials are dead (e.g. its refresh token
                 // expired, which happens when the CLI is unused and only Claude
-                // Desktop is signed in). Fall back to the in-app token only if
-                // this profile may use it; otherwise surface the error.
-                if (this._allowSharedToken && this._settings?.get_string('access-token'))
+                // Desktop is signed in). Fall back to this profile's own in-app
+                // sign-in when it has one; otherwise surface the error.
+                if (this._storedToken())
                     return this._settingsToken();
                 throw e;
             }
         }
-        if (this._allowSharedToken)
-            return this._settingsToken();
-        throw new SignedOutError('No Claude Code login found in this profile’s directory.');
+        // No on-disk credentials: fall back to this profile's own in-app
+        // sign-in, which throws SignedOutError when it has never signed in.
+        return this._settingsToken();
     }
 
     async fetchUsage(cancellable = null) {

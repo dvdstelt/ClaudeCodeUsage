@@ -32,6 +32,11 @@
       <summary>Show the time until reset</summary>
       <description>Display, in the panel, the time left before the window selected by panel-window resets.</description>
     </key>
+    <key name="show-profile-chip" type="b">
+      <default>true</default>
+      <summary>Show the profile tag</summary>
+      <description>Display a short two-letter tag before each profile's gauge in the panel, to tell profiles apart. Only ever shown when more than one profile is configured.</description>
+    </key>
     <key name="panel-window" type="s">
       <choices>
         <choice value="five-hour"/>
@@ -58,6 +63,11 @@
       <default>false</default>
       <summary>Whether the profile list has been seeded</summary>
       <description>Set once auto-detection has populated "profiles" for the first time, so a user who removes every profile afterwards isn't re-seeded.</description>
+    </key>
+    <key name="profile-tokens" type="s">
+      <default>'{}'</default>
+      <summary>Per-profile OAuth tokens</summary>
+      <description>JSON object mapping a profile id to its in-app sign-in tokens ({accessToken, refreshToken, expiresAt}). Each profile signs in to its own Claude account; the older single access-token/refresh-token keys are migrated into here on first use.</description>
     </key>
     <key name="access-token" type="s">
       <default>''</default>

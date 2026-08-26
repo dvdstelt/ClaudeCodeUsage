@@ -416,11 +416,14 @@ class PanelBar {
 // instances are orchestrated by ClaudeUsageIndicator, which shares a single
 // panel icon, poll timer, and countdown across all of them.
 class ProfileView {
-    constructor(profile, settings, panelBox, sectionsBox, showChip, isFirst, allowSharedToken) {
+    constructor(profile, settings, panelBox, sectionsBox, showChip, isFirst, allowSharedToken, path) {
         this.profile = profile;
         this._settings = settings;
-        this._client = new UsageClient({configDir: profile.configDir, settings, allowSharedToken});
+        this._client = new UsageClient({configDir: profile.configDir, settings, allowSharedToken, profileId: profile.id});
         this._lastUsage = null;
+        // Outcome of this profile's last refresh ('ok' | 'error' | 'signed-out'),
+        // read by the indicator for the shared "Updated …" line.
+        this.lastResult = null;
         // Normalised windows from the last render, cached for the panel
         // selector and the between-poll countdown.
         this._windows = [];
@@ -462,8 +465,16 @@ class ProfileView {
             style_class: isFirst ? 'cu-profile-section' : 'cu-profile-section cu-profile-section-divider',
         });
 
+        // Each profile carries its own logo and name, so the popup reads as a
+        // list of accounts rather than one branded header over anonymous rows.
         const header = new St.BoxLayout({style_class: 'cu-profile-header'});
-        const who = new St.BoxLayout({vertical: true, x_expand: true});
+        this._logo = new St.Icon({
+            gicon: Gio.icon_new_for_string(`${path}/icons/octopus.png`),
+            style_class: 'cu-logo',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        header.add_child(this._logo);
+        const who = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this._label = new St.Label({text: profile.label, style_class: 'cu-title'});
         this._subtitle = new St.Label({text: '', style_class: 'cu-subtitle'});
         who.add_child(this._label);
@@ -487,8 +498,6 @@ class ProfileView {
         this._error.visible = false;
         this._section.add_child(this._error);
 
-        this._updated = new St.Label({text: 'Loading…', style_class: 'cu-updated'});
-        this._section.add_child(this._updated);
 
         sectionsBox.add_child(this._section);
     }
@@ -500,6 +509,10 @@ class ProfileView {
         this._panelPct.visible = this._settings.get_boolean('show-percentage');
         this._panelTier.visible = this._settings.get_boolean('show-tier');
         this._panelReset.visible = this._settings.get_boolean('show-reset');
+        // The chip is only built with more than one profile, and is then
+        // toggleable — some people would rather not spend the panel width.
+        if (this._chip)
+            this._chip.visible = this._settings.get_boolean('show-profile-chip');
     }
 
     async applyTierFromDisk(cancellable) {
@@ -594,9 +607,7 @@ class ProfileView {
         this._renderSpend(usage);
 
         this.renderPanel();
-
-        const now = GLib.DateTime.new_now_local();
-        this._updated.text = `Updated ${now.format('%H:%M:%S')}`;
+        this.lastResult = 'ok';
     }
 
     // Renders the "extra usage" line from the normalised spend block (the new
@@ -760,7 +771,7 @@ class ProfileView {
         this._error.text = msg;
         this._error.style_class = 'cu-error';
         this._error.visible = true;
-        this._updated.text = 'Update failed';
+        this.lastResult = 'error';
         logError(e, `claude-usage: refresh failed for "${this.profile.label}"`);
     }
 
@@ -789,8 +800,8 @@ class ProfileView {
         this._error.text = e.message;
         this._error.style_class = 'cu-error cu-dim';
         this._error.visible = true;
-        // Nothing to timestamp; the subtitle and note already say "signed out".
-        this._updated.text = '';
+        // Not a failure: the subtitle and note already say "signed out".
+        this.lastResult = 'signed-out';
     }
 
     // Destroys every widget this view owns, leaf-first, then releases the
@@ -814,10 +825,10 @@ class ProfileView {
         this._panelBlock?.destroy();
 
         // Popup section contents, then the section itself.
+        this._logo?.destroy();
         this._label?.destroy();
         this._subtitle?.destroy();
         this._pill?.destroy();
-        this._updated?.destroy();
         this._metersBox?.destroy();
         this._section?.destroy();
 
@@ -829,10 +840,10 @@ class ProfileView {
         this._panelTier = null;
         this._panelSep = null;
         this._panelBlock = null;
+        this._logo = null;
         this._label = null;
         this._subtitle = null;
         this._pill = null;
-        this._updated = null;
         this._metersBox = null;
         this._section = null;
         this._meterBindings = [];
@@ -885,6 +896,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             'changed::show-percentage', () => this._applyVisibility(),
             'changed::show-tier', () => this._applyVisibility(),
             'changed::show-reset', () => this._applyVisibility(),
+            'changed::show-profile-chip', () => this._applyVisibility(),
             'changed::panel-window', () => this._renderAllPanels(),
             'changed::poll-seconds', () => this._startTimer(),
             // Signing in (or out) from prefs changes the token source; refetch.
@@ -922,7 +934,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             const ownsDefaultDir = Gio.File.new_for_path(profile.configDir).equal(defaultDir);
             const allowSharedToken = profiles.length === 1 || ownsDefaultDir;
             return new ProfileView(profile, this._settings, this._panelBox,
-                this._sectionsBox, showChip, i === 0, allowSharedToken);
+                this._sectionsBox, showChip, i === 0, allowSharedToken, this._path);
         });
         this._applyVisibility();
         for (const view of this._profileViews)
@@ -947,20 +959,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         item.add_child(root);
         this.menu.addMenuItem(item);
 
-        // header (static branding; per-profile identity lives in each section)
-        const header = new St.BoxLayout({style_class: 'cu-header'});
-        const logo = new St.Icon({
-            gicon: Gio.icon_new_for_string(`${this._path}/icons/octopus.png`),
-            style_class: 'cu-logo',
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        const who = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
-        who.add_child(new St.Label({text: 'Claude', style_class: 'cu-title'}));
-        who.add_child(new St.Label({text: 'usage', style_class: 'cu-subtitle'}));
-        header.add_child(logo);
-        header.add_child(who);
-        root.add_child(header);
-
+        // No global header: each profile section carries its own logo and name,
+        // so a single-profile popup looks the way it always did.
         // One section per profile, rebuilt whenever the profile list changes.
         this._sectionsBox = new St.BoxLayout({vertical: true});
         root.add_child(this._sectionsBox);
@@ -977,6 +977,10 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
         // footer
         const footer = new St.BoxLayout({style_class: 'cu-footer'});
+        // One timestamp for the whole popup: every profile refreshes in the
+        // same cycle, so a per-profile time would just repeat itself.
+        this._updated = new St.Label({text: 'Loading…', style_class: 'cu-updated', x_expand: true});
+        footer.add_child(this._updated);
         const settingsBtn = new St.Button({label: '⚙ Settings', style_class: 'cu-refresh', x_expand: true});
         settingsBtn.connect('clicked', () => {
             this.menu.close();
@@ -1003,6 +1007,24 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             this._refresh();
             return GLib.SOURCE_CONTINUE;
         });
+    }
+
+    // One shared timestamp for the whole popup. Every profile refreshes in the
+    // same cycle, so this reports the cycle: the time when at least one profile
+    // updated, "Update failed" when every profile that could have fetched
+    // failed, and nothing at all when they are simply all signed out.
+    _renderUpdatedAt() {
+        if (!this._updated)
+            return;
+        const results = this._profileViews.map(v => v.lastResult);
+        if (results.includes('ok')) {
+            const now = GLib.DateTime.new_now_local();
+            this._updated.text = `Updated ${now.format('%H:%M:%S')}`;
+        } else if (results.includes('error')) {
+            this._updated.text = 'Update failed';
+        } else {
+            this._updated.text = '';
+        }
     }
 
     _applyVisibility() {
@@ -1034,8 +1056,10 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         Promise.allSettled(this._profileViews.map(view => view.refresh(cancellable)))
             .finally(() => {
                 this._busy = false;
-                if (!cancellable.is_cancelled())
-                    this._scheduleCountdown();
+                if (cancellable.is_cancelled())
+                    return;
+                this._renderUpdatedAt();
+                this._scheduleCountdown();
             });
     }
 
@@ -1087,6 +1111,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._settings.disconnectObject(this);
         this._settings = null;
 
+        this._updated?.destroy();
+        this._updated = null;
         this._refreshBtn?.disconnectObject(this);
         this._refreshBtn?.destroy();
         this._refreshBtn = null;
