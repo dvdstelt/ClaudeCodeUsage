@@ -90,6 +90,7 @@ gnome-extensions prefs claude-usage@dvdstelt.github.io
 - **Panel elements** - show or hide the icon, percentage, time until reset, and tier, and choose the usage gauge (circle, bar, or none).
 - **Panel reflects** - which window the ring, percentage, and time-until-reset countdown track: the 5-hour window, the 7-day window, or whichever is most constrained.
 - **Panel position** - which section of the top bar the indicator sits in (left, center, or right), and where it sits among the other items there. Changes apply immediately.
+- **Shortcut to open the popup** - an optional keyboard shortcut that opens the usage dropdown, the way `Super+S` opens GNOME's quick settings. Not set by default; click the row to record one, or the clear button to remove it.
 - **Refresh interval** - how often to poll for updated usage (30 to 600 seconds; default 300).
 
 ## Authentication

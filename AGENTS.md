@@ -31,6 +31,8 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   `panel-window` (`five-hour`|`seven-day`|`max`|`worst`), `poll-seconds` (30-600),
   `panel-position` (`left`|`center`|`right`) + `panel-index` (0-20, where the
   indicator sits in that box; applied live by re-registering it in `_place()`),
+  `toggle-menu` (`as`, keyboard shortcut that opens the popup; empty = unbound,
+  registered with `Main.wm.addKeybinding` like the shell's own panel menus),
   `profiles` (JSON string, array of `{id, label, configDir}`),
   `profile-tokens` (JSON string, profile id -> in-app tokens),
   `show-profile-chip` (bool),

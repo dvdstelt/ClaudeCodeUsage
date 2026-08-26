@@ -64,6 +64,11 @@
       <summary>Position within the panel box</summary>
       <description>Where the indicator sits among the other items in its panel box. 0 is the first slot; larger values move it further along. Values beyond the number of items simply place it last.</description>
     </key>
+    <key name="toggle-menu" type="as">
+      <default><![CDATA[[]]]></default>
+      <summary>Shortcut to open the usage popup</summary>
+      <description>Keyboard shortcut that opens and closes the usage dropdown, the same as clicking the panel indicator. Empty means no shortcut is bound.</description>
+    </key>
     <key name="poll-seconds" type="i">
       <range min="30" max="600"/>
       <default>300</default>

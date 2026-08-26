@@ -4,6 +4,8 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Pango from 'gi://Pango';
+import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 import Cairo from 'cairo';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -1143,6 +1145,18 @@ export default class ClaudeUsageExtension extends Extension {
             'changed::panel-index', () => this._place(),
             this);
         this._place();
+
+        // Optional shortcut that opens the popup, the same as clicking the
+        // indicator — the shell binds its own panel menus this way (Super+S
+        // for quick settings). Unbound by default, so nothing is taken from
+        // the user until they choose a combination. Meta follows the GSettings
+        // key itself, so changing the shortcut needs no extra plumbing.
+        Main.wm.addKeybinding(
+            'toggle-menu',
+            this._settings,
+            Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
+            () => this._indicator?.menu.toggle());
     }
 
     // Puts the indicator in the configured panel box. addToStatusArea refuses a
@@ -1159,6 +1173,7 @@ export default class ClaudeUsageExtension extends Extension {
     }
 
     disable() {
+        Main.wm.removeKeybinding('toggle-menu');
         this._settings?.disconnectObject(this);
         this._settings = null;
         this._indicator?.destroy();
