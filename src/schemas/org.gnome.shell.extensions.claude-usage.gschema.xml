@@ -32,6 +32,11 @@
       <summary>Show the time until reset</summary>
       <description>Display, in the panel, the time left before the window selected by panel-window resets.</description>
     </key>
+    <key name="show-profile-chip" type="b">
+      <default>true</default>
+      <summary>Show the profile tag</summary>
+      <description>Display a short two-letter tag before each profile's gauge in the panel, to tell profiles apart. Only ever shown when more than one profile is configured.</description>
+    </key>
     <key name="panel-window" type="s">
       <choices>
         <choice value="five-hour"/>

@@ -88,6 +88,14 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
             settings.bind(key, row, 'active', Gio.SettingsBindFlags.DEFAULT);
         }
 
+        // Only has any effect with more than one profile configured.
+        const chipRow = new Adw.SwitchRow({
+            title: 'Profile tag',
+            subtitle: 'Show a short tag (e.g. "DW") before each profile\'s gauge, when you have more than one profile.',
+        });
+        elements.add(chipRow);
+        settings.bind('show-profile-chip', chipRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+
         // Time-until-reset for the window chosen by "Panel reflects" below.
         const resetRow = new Adw.SwitchRow({
             title: 'Time until reset',

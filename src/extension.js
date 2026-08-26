@@ -416,9 +416,12 @@ class PanelBar {
 // instances are orchestrated by ClaudeUsageIndicator, which shares a single
 // panel icon, poll timer, and countdown across all of them.
 class ProfileView {
-    constructor(profile, settings, panelBox, sectionsBox, showChip, isFirst, allowSharedToken) {
+    constructor(profile, settings, panelBox, sectionsBox, showChip, isFirst, allowSharedToken, path) {
         this.profile = profile;
         this._settings = settings;
+        // Whether a chip is possible at all (more than one profile); the
+        // show-profile-chip setting then decides if it is actually shown.
+        this._chipAllowed = showChip;
         this._client = new UsageClient({configDir: profile.configDir, settings, allowSharedToken});
         this._lastUsage = null;
         // Normalised windows from the last render, cached for the panel
@@ -462,8 +465,16 @@ class ProfileView {
             style_class: isFirst ? 'cu-profile-section' : 'cu-profile-section cu-profile-section-divider',
         });
 
+        // Each profile carries its own logo and name, so the popup reads as a
+        // list of accounts rather than one branded header over anonymous rows.
         const header = new St.BoxLayout({style_class: 'cu-profile-header'});
-        const who = new St.BoxLayout({vertical: true, x_expand: true});
+        this._logo = new St.Icon({
+            gicon: Gio.icon_new_for_string(`${path}/icons/octopus.png`),
+            style_class: 'cu-logo',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        header.add_child(this._logo);
+        const who = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this._label = new St.Label({text: profile.label, style_class: 'cu-title'});
         this._subtitle = new St.Label({text: '', style_class: 'cu-subtitle'});
         who.add_child(this._label);
@@ -500,6 +511,10 @@ class ProfileView {
         this._panelPct.visible = this._settings.get_boolean('show-percentage');
         this._panelTier.visible = this._settings.get_boolean('show-tier');
         this._panelReset.visible = this._settings.get_boolean('show-reset');
+        // The chip only exists with more than one profile, and is then
+        // toggleable — some people would rather not spend the panel width.
+        if (this._chip)
+            this._chip.visible = this._chipAllowed && this._settings.get_boolean('show-profile-chip');
     }
 
     async applyTierFromDisk(cancellable) {
@@ -814,6 +829,7 @@ class ProfileView {
         this._panelBlock?.destroy();
 
         // Popup section contents, then the section itself.
+        this._logo?.destroy();
         this._label?.destroy();
         this._subtitle?.destroy();
         this._pill?.destroy();
@@ -829,6 +845,7 @@ class ProfileView {
         this._panelTier = null;
         this._panelSep = null;
         this._panelBlock = null;
+        this._logo = null;
         this._label = null;
         this._subtitle = null;
         this._pill = null;
@@ -885,6 +902,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             'changed::show-percentage', () => this._applyVisibility(),
             'changed::show-tier', () => this._applyVisibility(),
             'changed::show-reset', () => this._applyVisibility(),
+            'changed::show-profile-chip', () => this._applyVisibility(),
             'changed::panel-window', () => this._renderAllPanels(),
             'changed::poll-seconds', () => this._startTimer(),
             // Signing in (or out) from prefs changes the token source; refetch.
@@ -922,7 +940,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             const ownsDefaultDir = Gio.File.new_for_path(profile.configDir).equal(defaultDir);
             const allowSharedToken = profiles.length === 1 || ownsDefaultDir;
             return new ProfileView(profile, this._settings, this._panelBox,
-                this._sectionsBox, showChip, i === 0, allowSharedToken);
+                this._sectionsBox, showChip, i === 0, allowSharedToken, this._path);
         });
         this._applyVisibility();
         for (const view of this._profileViews)
@@ -947,20 +965,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         item.add_child(root);
         this.menu.addMenuItem(item);
 
-        // header (static branding; per-profile identity lives in each section)
-        const header = new St.BoxLayout({style_class: 'cu-header'});
-        const logo = new St.Icon({
-            gicon: Gio.icon_new_for_string(`${this._path}/icons/octopus.png`),
-            style_class: 'cu-logo',
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        const who = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
-        who.add_child(new St.Label({text: 'Claude', style_class: 'cu-title'}));
-        who.add_child(new St.Label({text: 'usage', style_class: 'cu-subtitle'}));
-        header.add_child(logo);
-        header.add_child(who);
-        root.add_child(header);
-
+        // No global header: each profile section carries its own logo and name,
+        // so a single-profile popup looks the way it always did.
         // One section per profile, rebuilt whenever the profile list changes.
         this._sectionsBox = new St.BoxLayout({vertical: true});
         root.add_child(this._sectionsBox);

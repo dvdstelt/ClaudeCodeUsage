@@ -64,12 +64,6 @@
     spacing: 0;
 }
 
-.cu-header {
-    spacing: 11px;
-    padding-bottom: 12px;
-    margin-bottom: 6px;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
-}
 .cu-logo {
     icon-size: 36px;
 }
@@ -102,8 +96,10 @@
     margin-top: 10px;
 }
 .cu-profile-header {
-    spacing: 8px;
-    margin-bottom: 10px;
+    spacing: 11px;
+    padding-bottom: 12px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
 }
 
 /* ===== meters ===== */
