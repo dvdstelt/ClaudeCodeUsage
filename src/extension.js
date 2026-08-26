@@ -424,6 +424,9 @@ class ProfileView {
         this._chipAllowed = showChip;
         this._client = new UsageClient({configDir: profile.configDir, settings, allowSharedToken});
         this._lastUsage = null;
+        // Outcome of this profile's last refresh ('ok' | 'error' | 'signed-out'),
+        // read by the indicator for the shared "Updated …" line.
+        this.lastResult = null;
         // Normalised windows from the last render, cached for the panel
         // selector and the between-poll countdown.
         this._windows = [];
@@ -498,8 +501,6 @@ class ProfileView {
         this._error.visible = false;
         this._section.add_child(this._error);
 
-        this._updated = new St.Label({text: 'Loading…', style_class: 'cu-updated'});
-        this._section.add_child(this._updated);
 
         sectionsBox.add_child(this._section);
     }
@@ -609,9 +610,7 @@ class ProfileView {
         this._renderSpend(usage);
 
         this.renderPanel();
-
-        const now = GLib.DateTime.new_now_local();
-        this._updated.text = `Updated ${now.format('%H:%M:%S')}`;
+        this.lastResult = 'ok';
     }
 
     // Renders the "extra usage" line from the normalised spend block (the new
@@ -775,7 +774,7 @@ class ProfileView {
         this._error.text = msg;
         this._error.style_class = 'cu-error';
         this._error.visible = true;
-        this._updated.text = 'Update failed';
+        this.lastResult = 'error';
         logError(e, `claude-usage: refresh failed for "${this.profile.label}"`);
     }
 
@@ -804,8 +803,8 @@ class ProfileView {
         this._error.text = e.message;
         this._error.style_class = 'cu-error cu-dim';
         this._error.visible = true;
-        // Nothing to timestamp; the subtitle and note already say "signed out".
-        this._updated.text = '';
+        // Not a failure: the subtitle and note already say "signed out".
+        this.lastResult = 'signed-out';
     }
 
     // Destroys every widget this view owns, leaf-first, then releases the
@@ -833,7 +832,6 @@ class ProfileView {
         this._label?.destroy();
         this._subtitle?.destroy();
         this._pill?.destroy();
-        this._updated?.destroy();
         this._metersBox?.destroy();
         this._section?.destroy();
 
@@ -849,7 +847,6 @@ class ProfileView {
         this._label = null;
         this._subtitle = null;
         this._pill = null;
-        this._updated = null;
         this._metersBox = null;
         this._section = null;
         this._meterBindings = [];
@@ -983,6 +980,10 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
         // footer
         const footer = new St.BoxLayout({style_class: 'cu-footer'});
+        // One timestamp for the whole popup: every profile refreshes in the
+        // same cycle, so a per-profile time would just repeat itself.
+        this._updated = new St.Label({text: 'Loading…', style_class: 'cu-updated', x_expand: true});
+        footer.add_child(this._updated);
         const settingsBtn = new St.Button({label: '⚙ Settings', style_class: 'cu-refresh', x_expand: true});
         settingsBtn.connect('clicked', () => {
             this.menu.close();
@@ -1009,6 +1010,24 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             this._refresh();
             return GLib.SOURCE_CONTINUE;
         });
+    }
+
+    // One shared timestamp for the whole popup. Every profile refreshes in the
+    // same cycle, so this reports the cycle: the time when at least one profile
+    // updated, "Update failed" when every profile that could have fetched
+    // failed, and nothing at all when they are simply all signed out.
+    _renderUpdatedAt() {
+        if (!this._updated)
+            return;
+        const results = this._profileViews.map(v => v.lastResult);
+        if (results.includes('ok')) {
+            const now = GLib.DateTime.new_now_local();
+            this._updated.text = `Updated ${now.format('%H:%M:%S')}`;
+        } else if (results.includes('error')) {
+            this._updated.text = 'Update failed';
+        } else {
+            this._updated.text = '';
+        }
     }
 
     _applyVisibility() {
@@ -1040,8 +1059,10 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         Promise.allSettled(this._profileViews.map(view => view.refresh(cancellable)))
             .finally(() => {
                 this._busy = false;
-                if (!cancellable.is_cancelled())
-                    this._scheduleCountdown();
+                if (cancellable.is_cancelled())
+                    return;
+                this._renderUpdatedAt();
+                this._scheduleCountdown();
             });
     }
 
@@ -1093,6 +1114,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._settings.disconnectObject(this);
         this._settings = null;
 
+        this._updated?.destroy();
+        this._updated = null;
         this._refreshBtn?.disconnectObject(this);
         this._refreshBtn?.destroy();
         this._refreshBtn = null;
