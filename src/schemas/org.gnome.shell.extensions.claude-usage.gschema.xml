@@ -64,6 +64,11 @@
       <summary>Whether the profile list has been seeded</summary>
       <description>Set once auto-detection has populated "profiles" for the first time, so a user who removes every profile afterwards isn't re-seeded.</description>
     </key>
+    <key name="profile-tokens" type="s">
+      <default>'{}'</default>
+      <summary>Per-profile OAuth tokens</summary>
+      <description>JSON object mapping a profile id to its in-app sign-in tokens ({accessToken, refreshToken, expiresAt}). Each profile signs in to its own Claude account; the older single access-token/refresh-token keys are migrated into here on first use.</description>
+    </key>
     <key name="access-token" type="s">
       <default>''</default>
       <summary>OAuth access token</summary>

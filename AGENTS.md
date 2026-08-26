@@ -2,9 +2,9 @@
 
 A GNOME Shell panel indicator that shows your Claude subscription tier and live
 usage limits (5-hour and 7-day windows). It reuses the OAuth token that Claude
-Code already stores on disk, so there is usually no separate login. When Claude
-Code is not signed in, prefs offers an in-app PKCE sign-in as a fallback; that
-sign-in group is hidden whenever Claude Code credentials are present.
+Code already stores on disk, so there is usually no separate login. Each profile
+can also sign in on its own, from a PKCE flow in its row in prefs, for accounts
+that never use the CLI.
 
 ## Layout
 
@@ -21,15 +21,17 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   uniformly). A small chip (e.g. "TE") tags each panel block only when more
   than one profile is configured.
 - `src/prefs.js` — Adwaita preferences (element toggles, panel window, refresh
-  interval, the "Claude profiles" list), bound to GSettings. Also hosts the
-  fallback PKCE sign-in flow, shown only when no configured profile has usable
-  on-disk credentials (`claudeCodeCredentialsAvailable(configDir)` for every
-  profile).
+  interval, the "Claude profiles" list), bound to GSettings. Each profile row
+  carries its own PKCE sign-in (`_addSignInRows`): a status line that reads
+  "Using Claude Code", "Connected", or "Not connected", plus Connect, a field
+  for the pasted code, and Disconnect.
 - `src/schemas/` — GSettings schema (`org.gnome.shell.extensions.claude-usage`).
   Keys: `show-icon`/`show-percentage`/`show-tier`/`show-reset` (bool),
   `panel-gauge` (`ring`|`bar`|`none`),
   `panel-window` (`five-hour`|`seven-day`|`max`|`worst`), `poll-seconds` (30-600),
   `profiles` (JSON string, array of `{id, label, configDir}`),
+  `profile-tokens` (JSON string, profile id -> in-app tokens),
+  `show-profile-chip` (bool),
   `profiles-initialized` (bool, set once auto-detection has seeded `profiles`
   so a deliberately-emptied list isn't re-seeded), and the in-app sign-in
   tokens `access-token`/`refresh-token` (string) + `expires-at` (int64 ms).
@@ -38,11 +40,11 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   `configDir` (that profile's on-disk credentials first, the extension's own
   GSettings tokens second), calls the usage and profile endpoints, refreshes the
   token when near expiry, and writes it back to whichever store it came from.
-  Only one in-app sign-in is supported, so the `allowSharedToken` option gates
-  the fallback to that token to just the profile it can belong to (the sole
-  profile, or the one owning `~/.claude` — decided in `extension.js`); any other
-  profile without on-disk credentials resolves to a `SignedOutError` that the
-  panel shows as a muted "Signed out" state. Exports
+  Takes a `profileId` and resolves that profile's own in-app token from
+  `tokenStore.js` when the on-disk credentials are missing or dead; a profile
+  that has never signed in resolves to a `SignedOutError`, which the panel shows
+  as a muted "Signed out" state. `allowSharedToken` now only decides which
+  single profile may claim a pre-per-profile sign-in during migration. Exports
   `claudeCodeCredentialsAvailable(configDir)`, `defaultConfigDir()`
   (`~/.claude`), and `discoverConfigDirs()` (finds `~/.claude` and sibling
   `~/.claude-*` directories that already hold credentials). Soup is pinned
@@ -53,6 +55,12 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   from `discoverConfigDirs()` once, gated by `profiles-initialized`). Kept
   shell-import-free like `usageClient.js` so prefs and plain `gjs` can use it
   too.
+- `src/lib/tokenStore.js` — per-profile in-app OAuth tokens, kept as a JSON
+  object in the `profile-tokens` GSettings key keyed by profile id. Each
+  profile signs in to its own Claude account; `migrateLegacyToken()` moves a
+  pre-per-profile single sign-in onto the one profile entitled to it. No
+  imports at all, so it is unit-testable under plain `node`
+  (`tools/test-tokenStore.mjs`).
 - `src/lib/oauth.js` — shared OAuth/API constants (client id, endpoints,
   scopes, headers) and text codecs, imported by both `usageClient.js` and
   `prefs.js` so the values are defined once. No shell imports.

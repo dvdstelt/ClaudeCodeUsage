@@ -92,7 +92,7 @@ gnome-extensions prefs claude-usage@dvdstelt.github.io
 The extension never asks for your password. It uses an OAuth token in one of two ways:
 
 1. **Claude Code (preferred).** If `~/.claude/.credentials.json` contains a valid token, the extension uses it directly. When the token is close to expiry it is refreshed automatically with the stored refresh token and written back to the same file, so it stays valid whether or not Claude Code itself is running. Because the credentials are shared, you stay signed in to both. If those credentials have fully expired (for example you only use Claude Desktop and never sign in to the Claude Code CLI), the extension falls back to the in-app sign-in below.
-2. **In-app sign-in (fallback).** When Claude Code has no valid token, the preferences window shows an **Account** group with a Connect button. It runs a standard PKCE OAuth flow: Connect opens your browser, you authorize, and paste the resulting code back into the preferences window. The tokens are stored in GSettings and refreshed automatically before they expire. This group is hidden whenever Claude Code has a valid token, since there is nothing to do in that case; it reappears once that token expires.
+2. **In-app sign-in (fallback).** Every profile has its own **Connect** button in its row under "Claude profiles", so each profile can sign in to its own Claude account without the CLI. It runs a standard PKCE OAuth flow: Connect opens your browser, you authorize, and paste the resulting code back into the preferences window. Tokens are stored per profile in GSettings and refreshed automatically before they expire. A profile that is already signed in through Claude Code says so and needs nothing here.
 
 ## How it works
 
@@ -118,6 +118,8 @@ The repository is laid out as:
   - `lib/profiles.js` - the profile list (label + config directory), stored as
     JSON in GSettings; auto-detects `~/.claude` and sibling `~/.claude-*`
     directories on first run.
+  - `lib/tokenStore.js` - per-profile in-app OAuth tokens, stored as JSON in
+    GSettings and keyed by profile id.
   - `lib/oauth.js` - shared OAuth/API constants and text codecs used by both
     the usage client and prefs.
   - `schemas/` - GSettings schema. Recompile after edits with

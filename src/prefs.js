@@ -12,6 +12,7 @@ import {
     DEFAULT_EXPIRES_IN, encoder, decoder,
 } from './lib/oauth.js';
 import {loadProfiles, saveProfiles, makeProfileId, labelForDirName, ensureProfiles} from './lib/profiles.js';
+import {getToken, setToken, clearToken} from './lib/tokenStore.js';
 
 // Gtk.FileDialog predates GJS's automatic async/finish pairing for this
 // class on some GNOME versions, so promisify it explicitly.
@@ -165,17 +166,9 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         // ---- profiles (one per Claude Code account / config directory) ----
         await this._addProfilesGroup(page, settings, window);
 
-        // ---- sign-in (only when no profile can supply a Claude Code token) ----
-        // If any profile is signed in via Claude Code, the extension rides on
-        // its credentials and there's nothing to do here for that account, so
-        // the whole group is omitted rather than shown disabled. It reappears
-        // once every profile's on-disk token has expired.
-        const profiles = await ensureProfiles(settings);
-        const anyCredentialed = (await Promise.all(
-            profiles.map(p => claudeCodeCredentialsAvailable(p.configDir)))).some(Boolean);
-        if (!anyCredentialed)
-            this._addAuthGroup(page, settings);
-
+        // Sign-in is no longer a single global group: each profile row carries
+        // its own Connect/Disconnect, since every profile signs in to its own
+        // Claude account.
         this._addAboutGroup(page);
     }
 
@@ -239,11 +232,16 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
             folderRow.add_suffix(changeBtn);
             row.add_row(folderRow);
 
+            this._addSignInRows(row, settings, profile);
+
             const removeRow = new Adw.ActionRow({title: 'Remove this profile'});
             const removeBtn = new Gtk.Button({
                 label: 'Remove', valign: Gtk.Align.CENTER, css_classes: ['destructive-action'],
             });
             removeBtn.connect('clicked', () => {
+                // Drop the profile's stored sign-in too, so a removed account's
+                // tokens don't linger in settings.
+                clearToken(settings, profile.id);
                 persist(loadProfiles(settings).filter(x => x.id !== profile.id));
             });
             removeRow.add_suffix(removeBtn);
@@ -335,62 +333,64 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         return btn;
     }
 
-    // Adds an Authentication group with a PKCE OAuth sign-in flow: Connect opens
-    // the browser, the user pastes back the code, and tokens land in GSettings.
-    _addAuthGroup(page, settings) {
-        const authGroup = new Adw.PreferencesGroup({
-            title: 'Account',
-            description: 'Claude Code was not detected. Sign in so the extension can read your usage.',
-        });
-        page.add(authGroup);
+    // Adds this profile's own sign-in rows: a status line, Connect (which opens
+    // the browser for a PKCE flow), a field to paste the returned code, and
+    // Disconnect. Each profile signs in to its own Claude account, so the tokens
+    // are stored per profile id rather than as one shared credential.
+    _addSignInRows(expander, settings, profile) {
+        const hasInApp = () => getToken(settings, profile.id) !== null;
 
-        const isConnected = () => settings.get_string('access-token') !== '';
-
-        const statusRow = new Adw.ActionRow({title: 'Status'});
+        const statusRow = new Adw.ActionRow({title: 'Sign-in'});
         const statusLabel = new Gtk.Label({valign: Gtk.Align.CENTER});
         statusRow.add_suffix(statusLabel);
-        authGroup.add(statusRow);
+        expander.add_row(statusRow);
 
-        const setStatus = (msg, connected) => {
+        const setStatus = (msg, good) => {
             statusLabel.set_label(msg);
-            statusLabel.set_css_classes(connected ? ['success'] : ['dim-label']);
+            statusLabel.set_css_classes(good ? ['success'] : ['dim-label']);
         };
 
         const connectRow = new Adw.ActionRow({
-            title: 'Connect Claude account',
-            subtitle: 'Opens your browser to authorize the extension.',
+            title: 'Connect this profile',
+            subtitle: 'Opens your browser to authorize this account.',
         });
         const connectButton = new Gtk.Button({
-            label: 'Connect',
-            valign: Gtk.Align.CENTER,
-            css_classes: ['suggested-action'],
+            label: 'Connect', valign: Gtk.Align.CENTER, css_classes: ['suggested-action'],
         });
         connectRow.add_suffix(connectButton);
         connectRow.set_activatable_widget(connectButton);
-        authGroup.add(connectRow);
+        expander.add_row(connectRow);
 
-        const codeRow = new Adw.EntryRow({
-            title: 'Paste code from browser',
-            show_apply_button: true,
-        });
+        const codeRow = new Adw.EntryRow({title: 'Paste code from browser', show_apply_button: true});
         codeRow.set_visible(false);
-        authGroup.add(codeRow);
+        expander.add_row(codeRow);
 
         const disconnectRow = new Adw.ActionRow({
-            title: 'Disconnect',
-            subtitle: 'Remove the stored sign-in.',
+            title: 'Disconnect', subtitle: 'Forget this profile\u2019s in-app sign-in.',
         });
         const disconnectButton = new Gtk.Button({
-            label: 'Disconnect',
-            valign: Gtk.Align.CENTER,
-            css_classes: ['destructive-action'],
+            label: 'Disconnect', valign: Gtk.Align.CENTER, css_classes: ['destructive-action'],
         });
         disconnectRow.add_suffix(disconnectButton);
         disconnectRow.set_activatable_widget(disconnectButton);
-        disconnectRow.set_visible(isConnected());
-        authGroup.add(disconnectRow);
+        disconnectRow.set_visible(hasInApp());
+        expander.add_row(disconnectRow);
 
-        setStatus(isConnected() ? 'Connected' : 'Not connected', isConnected());
+        // Claude Code's own credentials win when they are usable, so say so
+        // rather than implying the user still has to sign in here.
+        const refreshStatus = async () => {
+            if (hasInApp()) {
+                setStatus('Connected', true);
+                disconnectRow.set_visible(true);
+            } else if (await claudeCodeCredentialsAvailable(profile.configDir)) {
+                setStatus('Using Claude Code', true);
+                disconnectRow.set_visible(false);
+            } else {
+                setStatus('Not connected', false);
+                disconnectRow.set_visible(false);
+            }
+        };
+        refreshStatus();
 
         // PKCE state for the in-progress flow.
         let codeVerifier = null;
@@ -411,7 +411,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
             Gio.AppInfo.launch_default_for_uri(`${AUTHORIZE_URL}?${params}`, null);
             codeRow.set_text('');
             codeRow.set_visible(true);
-            setStatus('Waiting for code…', false);
+            setStatus('Waiting for code\u2026', false);
         });
 
         codeRow.connect('apply', () => {
@@ -422,7 +422,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
 
             // Accept the raw "code#state" the callback page shows, or a full
             // pasted callback URL.
-            let input = codeRow.get_text().trim();
+            const input = codeRow.get_text().trim();
             let code = input;
             let state = oauthState;
             try {
@@ -444,7 +444,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
                 return;
             }
 
-            setStatus('Exchanging code…', false);
+            setStatus('Exchanging code\u2026', false);
             connectButton.set_sensitive(false);
 
             const body = JSON.stringify({
@@ -471,11 +471,11 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
                         return;
                     }
                     const resp = JSON.parse(text);
-                    settings.set_string('refresh-token', resp.refresh_token ?? '');
-                    settings.set_int64('expires-at',
-                        Date.now() + (resp.expires_in ?? DEFAULT_EXPIRES_IN) * 1000);
-                    // Set access-token last: the extension watches it to refetch.
-                    settings.set_string('access-token', resp.access_token);
+                    setToken(settings, profile.id, {
+                        accessToken: resp.access_token,
+                        refreshToken: resp.refresh_token ?? '',
+                        expiresAt: Date.now() + (resp.expires_in ?? DEFAULT_EXPIRES_IN) * 1000,
+                    });
                     setStatus('Connected', true);
                     codeRow.set_visible(false);
                     disconnectRow.set_visible(true);
@@ -491,14 +491,11 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         });
 
         disconnectButton.connect('clicked', () => {
-            settings.set_string('refresh-token', '');
-            settings.set_int64('expires-at', 0);
-            settings.set_string('access-token', '');
-            setStatus('Not connected', false);
-            disconnectRow.set_visible(false);
+            clearToken(settings, profile.id);
             codeRow.set_visible(false);
             codeVerifier = null;
             oauthState = null;
+            refreshStatus();
         });
     }
 }

@@ -422,7 +422,7 @@ class ProfileView {
         // Whether a chip is possible at all (more than one profile); the
         // show-profile-chip setting then decides if it is actually shown.
         this._chipAllowed = showChip;
-        this._client = new UsageClient({configDir: profile.configDir, settings, allowSharedToken});
+        this._client = new UsageClient({configDir: profile.configDir, settings, allowSharedToken, profileId: profile.id});
         this._lastUsage = null;
         // Outcome of this profile's last refresh ('ok' | 'error' | 'signed-out'),
         // read by the indicator for the shared "Updated …" line.
