@@ -25,7 +25,11 @@ preferences window.
 ## Requirements
 
 - GNOME Shell 46, 47, 48, 49, or 50 (Ubuntu 24.04 LTS and newer).
-- Either:
+- A **Claude Pro or Max subscription**. The extension reports the usage limits
+  that come with a Claude Code subscription, so a free account has nothing to
+  show and cannot be connected - authorization is refused before any token is
+  issued, whether you sign in from the extension or from the CLI.
+- Then either:
   - **Claude Code** signed in (the extension reads
     `~/.claude/.credentials.json`, or another profile directory you configure
     in preferences), or
@@ -89,7 +93,7 @@ gnome-extensions prefs claude-usage@dvdstelt.github.io
 
 ## Authentication
 
-The extension never asks for your password. It uses an OAuth token in one of two ways:
+The extension never asks for your password. It uses an OAuth token in one of two ways. Both require a Claude Pro or Max subscription: a free account is refused at Anthropic's authorization page, since it has no Claude Code usage limits to report.
 
 1. **Claude Code (preferred).** If `~/.claude/.credentials.json` contains a valid token, the extension uses it directly. When the token is close to expiry it is refreshed automatically with the stored refresh token and written back to the same file, so it stays valid whether or not Claude Code itself is running. Because the credentials are shared, you stay signed in to both. If those credentials have fully expired (for example you only use Claude Desktop and never sign in to the Claude Code CLI), the extension falls back to the in-app sign-in below.
 2. **In-app sign-in (fallback).** Every profile has its own **Connect** button in its row under "Claude profiles", so each profile can sign in to its own Claude account without the CLI. It runs a standard PKCE OAuth flow: Connect opens your browser, you authorize, and paste the resulting code back into the preferences window. Tokens are stored per profile in GSettings and refreshed automatically before they expire. A profile that is already signed in through Claude Code says so and needs nothing here.
