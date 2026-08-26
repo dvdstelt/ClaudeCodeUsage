@@ -1133,11 +1133,34 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
 export default class ClaudeUsageExtension extends Extension {
     enable() {
-        this._indicator = new ClaudeUsageIndicator(this.path, this.getSettings(), () => this.openPreferences());
-        Main.panel.addToStatusArea(this.uuid, this._indicator);
+        this._settings = this.getSettings();
+        this._indicator = new ClaudeUsageIndicator(
+            this.path, this._settings, () => this.openPreferences());
+        // Watch both placement keys so a move applies immediately, with no
+        // reload and no logging out.
+        this._settings.connectObject(
+            'changed::panel-position', () => this._place(),
+            'changed::panel-index', () => this._place(),
+            this);
+        this._place();
+    }
+
+    // Puts the indicator in the configured panel box. addToStatusArea refuses a
+    // role that is already registered, so the registration is cleared first;
+    // the indicator itself is reused, so moving it costs no refetch and leaves
+    // the poll timer and current readings alone.
+    _place() {
+        if (Main.panel.statusArea[this.uuid])
+            Main.panel.statusArea[this.uuid] = null;
+        Main.panel.addToStatusArea(
+            this.uuid, this._indicator,
+            this._settings.get_int('panel-index'),
+            this._settings.get_string('panel-position'));
     }
 
     disable() {
+        this._settings?.disconnectObject(this);
+        this._settings = null;
         this._indicator?.destroy();
         this._indicator = null;
     }

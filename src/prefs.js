@@ -150,6 +150,34 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         });
         behaviour.add(windowRow);
 
+        const positions = new Gtk.StringList();
+        positions.append('Left');
+        positions.append('Center');
+        positions.append('Right');
+        const positionKeys = ['left', 'center', 'right'];
+
+        const positionRow = new Adw.ComboRow({
+            title: 'Panel position',
+            subtitle: 'Which section of the top bar the indicator sits in.',
+            model: positions,
+        });
+        positionRow.selected = Math.max(0, positionKeys.indexOf(settings.get_string('panel-position')));
+        positionRow.connect('notify::selected', () => {
+            settings.set_string('panel-position', positionKeys[positionRow.selected]);
+        });
+        settings.connect('changed::panel-position', () => {
+            positionRow.selected = Math.max(0, positionKeys.indexOf(settings.get_string('panel-position')));
+        });
+        behaviour.add(positionRow);
+
+        const indexRow = new Adw.SpinRow({
+            title: 'Position in that section',
+            subtitle: 'Raise this to move the indicator further along; 0 puts it first.',
+            adjustment: new Gtk.Adjustment({lower: 0, upper: 20, step_increment: 1, page_increment: 5}),
+        });
+        behaviour.add(indexRow);
+        settings.bind('panel-index', indexRow, 'value', Gio.SettingsBindFlags.DEFAULT);
+
         const interval = new Adw.SpinRow({
             title: 'Refresh interval',
             subtitle: 'Seconds between usage updates.',
