@@ -1,5 +1,7 @@
 # Claude Code Usage Monitor
 
+<img width="260" height="332" alt="image" align="right" src="https://github.com/user-attachments/assets/d660c3d7-35e7-4f65-9b64-4a9602f94cde" />
+
 A GNOME Shell panel indicator that shows your Claude subscription tier and live
 usage limits right in the top bar, so you can see how much of your 5-hour and
 7-day windows you have left without opening a browser.
@@ -11,6 +13,10 @@ preferences window.
 
 > [!NOTE]
 > **What changed?** See the [changelog](CHANGELOG.md) for the notable changes in each release.
+
+See [install](#install) instructions
+
+<br /><br />
 
 ## Features
 
@@ -56,29 +62,6 @@ gnome-extensions enable claude-usage@dvdstelt.github.io
 On Wayland a newly installed extension only loads after you log out and back in.
 On X11 you can reload the shell with `Alt+F2`, then `r`, then Enter.
 
-### Building a release
-
-To produce the bundle you upload to extensions.gnome.org:
-
-```sh
-./build.sh
-```
-
-This writes `dist/claude-usage@dvdstelt.github.io.shell-extension.zip`,
-containing only the runtime files (no README, license, tools, or mockups).
-Upload it at <https://extensions.gnome.org/upload/>.
-
-To bump the version while building, pass one of `-major`, `-minor`, or
-`-patch`:
-
-```sh
-./build.sh -patch   # 1.1.1 -> 1.1.2
-./build.sh -minor   # 1.1.1 -> 1.2.0
-./build.sh -major   # 1.1.1 -> 2.0.0
-```
-
-A bump rewrites `version-name` in `src/metadata.json` and also increments the integer `version` field, which extensions.gnome.org requires to increase on every upload.
-
 ## Configuration
 
 Open the preferences from the dropdown (the gear button) or with:
@@ -95,47 +78,14 @@ gnome-extensions prefs claude-usage@dvdstelt.github.io
 
 ## Authentication
 
-The extension never asks for your password. It uses an OAuth token in one of two ways. Both require a Claude Pro or Max subscription: a free account is refused at Anthropic's authorization page, since it has no Claude Code usage limits to report.
+The extension **never asks for your password**. It uses an OAuth token in one of two ways. Both require a Claude Pro or Max subscription: a free account is refused at Anthropic's authorization page, since it has no Claude Code usage limits to report.
 
 1. **Claude Code (preferred).** If `~/.claude/.credentials.json` contains a valid token, the extension uses it directly. When the token is close to expiry it is refreshed automatically with the stored refresh token and written back to the same file, so it stays valid whether or not Claude Code itself is running. Because the credentials are shared, you stay signed in to both. If those credentials have fully expired (for example you only use Claude Desktop and never sign in to the Claude Code CLI), the extension falls back to the in-app sign-in below.
 2. **In-app sign-in (fallback).** Every profile has its own **Connect** button in its row under "Claude profiles", so each profile can sign in to its own Claude account without the CLI. It runs a standard PKCE OAuth flow: Connect opens your browser, you authorize, and paste the resulting code back into the preferences window. Tokens are stored per profile in GSettings and refreshed automatically before they expire. A profile that is already signed in through Claude Code says so and needs nothing here.
 
-## How it works
-
-`lib/usageClient.js` resolves a valid access token (Claude Code's on-disk credentials first, the extension's own tokens second), then calls Anthropic's OAuth usage and profile endpoints. It is a plain GI module with no GNOME Shell imports, so it can be run and tested on its own:
-
-```sh
-gjs -m tools/poll.js
-```
-
-The endpoints used are undocumented, internal Anthropic OAuth endpoints and may change without notice.
-
 ## Development
 
-The repository is laid out as:
-
-- `src/` - everything that ships in the extension bundle:
-  - `extension.js` - panel indicator and dropdown UI.
-  - `prefs.js` - Adwaita preferences, including the fallback sign-in flow.
-  - `stylesheet.css` - panel and popup styling.
-  - `lib/usageClient.js` - token resolution, refresh, and the usage/profile
-    calls, parameterized by config directory so each profile gets its own
-    client.
-  - `lib/profiles.js` - the profile list (label + config directory), stored as
-    JSON in GSettings; auto-detects `~/.claude` and sibling `~/.claude-*`
-    directories on first run.
-  - `lib/tokenStore.js` - per-profile in-app OAuth tokens, stored as JSON in
-    GSettings and keyed by profile id.
-  - `lib/oauth.js` - shared OAuth/API constants and text codecs used by both
-    the usage client and prefs.
-  - `schemas/` - GSettings schema. Recompile after edits with
-    `glib-compile-schemas src/schemas/`.
-  - `icons/` - panel and popup icons.
-- `build.sh` - packages `src/` into an uploadable bundle in `dist/`.
-- `tools/poll.js` - standalone validator for the usage client; run from the
-  repository root with `gjs -m tools/poll.js`.
-
-See `AGENTS.md` for the data sources and conventions in more detail.
+See `AGENTS.md` for the data sources and conventions in detail.
 
 ## Contributors
 
@@ -143,6 +93,7 @@ Built by [@dvdstelt](https://github.com/dvdstelt), with thanks to everyone who h
 
 - [@amalakhovsky](https://github.com/amalakhovsky) - rendering every usage window dynamically from the API's `limits[]` array (per-model windows such as Fable, the "worst active limit" panel option, structured spend), and fixing the popup bars to fill completely at 100%.
 - [@ClemDNL](https://github.com/ClemDNL) - the optional time-until-reset countdown in the panel.
+- [@rafi0x](https://github.com/rafi0x) - multiple profiles
 
 Pull requests are welcome. See `AGENTS.md` for the layout and conventions, and the [changelog](CHANGELOG.md) for what has landed so far.
 
