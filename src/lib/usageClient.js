@@ -1,9 +1,6 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
-// Pin Soup 3.0 inline: some systems still have the 2.4 typelib installed, and
-// without a version the prefs process (where the shell hasn't already loaded
-// Soup) could pick the wrong one.
-import Soup from 'gi://Soup?version=3.0';
+import Soup from 'gi://Soup';
 
 import {getToken, setToken, migrateLegacyToken} from './tokenStore.js';
 import {
