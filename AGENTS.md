@@ -51,9 +51,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   single profile may claim a pre-per-profile sign-in during migration. Exports
   `claudeCodeCredentialsAvailable(configDir)`, `defaultConfigDir()`
   (`~/.claude`), and `discoverConfigDirs()` (finds `~/.claude` and sibling
-  `~/.claude-*` directories that already hold credentials). Soup is pinned
-  inline via `gi://Soup?version=3.0` (some systems still ship the 2.4
-  typelib).
+  `~/.claude-*` directories that already hold credentials).
 - `src/lib/profiles.js` — the profile list: `loadProfiles`/`saveProfiles`
   (JSON in the `profiles` GSettings key) and `ensureProfiles` (seeds the list
   from `discoverConfigDirs()` once, gated by `profiles-initialized`). Kept
@@ -118,6 +116,30 @@ These are undocumented internal endpoints and may change without notice.
 - Keep `src/lib/usageClient.js` and `src/lib/usageModel.js` free of
   `resource:///org/gnome/shell` imports so they stay runnable under plain `gjs`
   (both are also imported by `prefs.js` or the tools).
+
+### Never pin a GI version
+
+Import GI libraries unversioned — `import Soup from 'gi://Soup'`, never
+`gi://Soup?version=3.0`, and no `imports.gi.versions` module either. Reviewers
+have asked for this twice now: once to delete a `lib/versions.js` that set
+`imports.gi.versions.Soup`, and again (rejecting 1.4.1) for the inline
+`?version=` spelling of the same thing. It is *not* in the written review
+guidelines, so it will not show up in the checklist — it comes from the human
+reviewer.
+
+The reason it matters: a pin is an assertion, not a preference. If the host
+process has already loaded another version, the import is a fatal error —
+`Error: Version 3.0 of GI module Soup already loaded, cannot load version 2.4`.
+GNOME Shell loads libsoup itself, so a pin can only match (redundant) or
+mismatch (breaks the extension outright on some future GNOME release). There is
+no upside inside the shell.
+
+The tempting reason to add one: on a machine with both the Soup 2.4 and 3.0
+typelibs, plain `gjs` warns "Requiring Soup but it has 2 versions available".
+That warning only appears in standalone `gjs` (i.e. `tools/poll.js`), where
+nothing has preloaded Soup, and it is harmless — GJS still resolves to 3.0.
+Inside the shell and prefs processes Soup 3 is already loaded. Do not "fix" it
+with a pin.
 
 ### Teardown rules
 
