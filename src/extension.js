@@ -1155,7 +1155,10 @@ export default class ClaudeUsageExtension extends Extension {
             'toggle-menu',
             this._settings,
             Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
-            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
+            // POPUP matters: while the dropdown is open the shell is in popup
+            // mode, and a binding without it goes silent — so the shortcut
+            // could open the menu but never close it again.
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
             () => this._indicator?.menu.toggle());
     }
 
