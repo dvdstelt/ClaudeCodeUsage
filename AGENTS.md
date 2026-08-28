@@ -85,6 +85,12 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   specific profile.
 - `tools/test-usageModel.mjs` — pure-`node` unit tests for `usageModel.js`
   (no network, no GI): `node tools/test-usageModel.mjs`.
+- `tools/compile-schemas.sh` — recompiles the GSettings schema for a
+  development install, and fails loudly if a key in the XML is missing from the
+  result. A no-op when the compiled file is already current.
+- `tools/git-hooks/` — `post-checkout`, `post-merge`, and `post-rewrite`, each
+  running `compile-schemas.sh`. Enable once per clone with
+  `git config core.hooksPath tools/git-hooks`.
 
 ## Data sources
 
@@ -169,11 +175,21 @@ Symlink `src/` (not the repo root) into the extensions folder:
 
 ```sh
 ln -s "$PWD/src" ~/.local/share/gnome-shell/extensions/claude-usage@dvdstelt.github.io
-glib-compile-schemas "$PWD/src/schemas/"
+git config core.hooksPath tools/git-hooks
+./tools/compile-schemas.sh
 gnome-extensions enable claude-usage@dvdstelt.github.io
 ```
 
 On Wayland a new extension only loads after logging out and back in.
+
+The `core.hooksPath` line matters more than it looks. The extensions folder
+symlinks `src/`, so the code follows every branch switch instantly, but
+`gschemas.compiled` is a gitignored build artifact that nothing regenerates.
+Checking out a branch that adds a GSettings key then leaves the shell reading a
+stale schema, and the extension dies at startup with `GSettings key <name> not
+found in schema …`. The hooks recompile on checkout, merge, and rebase so that
+cannot happen; `./tools/compile-schemas.sh` does it by hand. That error message
+always means "recompile", never a code fault.
 
 ## Release
 

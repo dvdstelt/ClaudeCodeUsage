@@ -53,11 +53,20 @@ The extension source lives in `src/`. Symlink that directory into the GNOME exte
 
 ```sh
 git clone https://github.com/dvdstelt/ClaudeCodeUsage.git
-ln -s "$PWD/ClaudeCodeUsage/src" \
+cd ClaudeCodeUsage
+ln -s "$PWD/src" \
   ~/.local/share/gnome-shell/extensions/claude-usage@dvdstelt.github.io
-glib-compile-schemas "$PWD/ClaudeCodeUsage/src/schemas/"
+git config core.hooksPath tools/git-hooks
+./tools/compile-schemas.sh
 gnome-extensions enable claude-usage@dvdstelt.github.io
 ```
+
+The `core.hooksPath` line keeps the compiled GSettings schema in step with
+whatever branch you have checked out. The extensions folder symlinks `src/`, so
+the code follows a branch switch instantly, but the compiled schema is a
+gitignored build artifact - without the hooks, checking out a branch that adds a
+setting leaves the extension failing to start with `GSettings key … not found in
+schema`. Run `./tools/compile-schemas.sh` any time to fix that by hand.
 
 On Wayland a newly installed extension only loads after you log out and back in.
 On X11 you can reload the shell with `Alt+F2`, then `r`, then Enter.

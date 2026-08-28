@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Keep the development install's compiled schema in step with the branch.
+# gschemas.compiled is gitignored, so switching to a branch that adds a
+# GSettings key would otherwise leave the shell reading a stale schema.
+exec "$(dirname "$0")/../compile-schemas.sh"
