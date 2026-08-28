@@ -1,6 +1,6 @@
 # Claude Code Usage Monitor
 
-<img width="260" height="332" alt="image" align="right" src="https://github.com/user-attachments/assets/d660c3d7-35e7-4f65-9b64-4a9602f94cde" />
+<img width="260" alt="image" align="right" src="https://github.com/user-attachments/assets/190b87b7-58cb-45f7-8782-788ca027d1b8" />
 
 A GNOME Shell panel indicator that shows your Claude subscription tier and live
 usage limits right in the top bar, so you can see how much of your 5-hour and
