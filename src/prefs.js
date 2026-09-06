@@ -14,6 +14,7 @@ import {
 } from './lib/oauth.js';
 import {loadProfiles, saveProfiles, makeProfileId, labelForDirName, ensureProfiles} from './lib/profiles.js';
 import {getToken, setToken, clearToken} from './lib/tokenStore.js';
+import {PANEL_SELECTORS, migratePanelWindows} from './lib/usageModel.js';
 
 const KOFI_URL = 'https://ko-fi.com/dvdstelt';
 
@@ -67,6 +68,10 @@ async function pickFolder(window, initialPath) {
 export default class ClaudeUsagePreferences extends ExtensionPreferences {
     async fillPreferencesWindow(window) {
         const settings = this.getSettings();
+        // Carry a pre-1.5 single "panel reflects" choice into panel-windows
+        // before the switches below read it (the extension does the same, but
+        // prefs can open first).
+        migratePanelWindows(settings);
 
         const page = new Adw.PreferencesPage({
             title: 'Panel',
@@ -100,10 +105,10 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         elements.add(chipRow);
         settings.bind('show-profile-chip', chipRow, 'active', Gio.SettingsBindFlags.DEFAULT);
 
-        // Time-until-reset for the window chosen by "Panel reflects" below.
+        // Time-until-reset for each window chosen under "Panel reflects" below.
         const resetRow = new Adw.SwitchRow({
             title: 'Time until reset',
-            subtitle: 'Show the time left before the window selected under "Panel reflects" resets.',
+            subtitle: 'Show the time left before each window shown in the panel resets.',
         });
         elements.add(resetRow);
         settings.bind('show-reset', resetRow, 'active', Gio.SettingsBindFlags.DEFAULT);
@@ -128,30 +133,12 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         });
         elements.add(gaugeRow);
 
+        // ---- which usage windows the panel shows ----
+        this._addPanelWindowsGroup(page, settings);
+
         // ---- behaviour ----
         const behaviour = new Adw.PreferencesGroup({title: 'Behaviour'});
         page.add(behaviour);
-
-        const windows = new Gtk.StringList();
-        windows.append('5-hour window');
-        windows.append('7-day window');
-        windows.append('Most constrained');
-        windows.append('Worst active limit');
-        const windowKeys = ['five-hour', 'seven-day', 'max', 'worst'];
-
-        const windowRow = new Adw.ComboRow({
-            title: 'Panel reflects',
-            subtitle: 'Which usage window the ring and percentage show.',
-            model: windows,
-        });
-        windowRow.selected = Math.max(0, windowKeys.indexOf(settings.get_string('panel-window')));
-        windowRow.connect('notify::selected', () => {
-            settings.set_string('panel-window', windowKeys[windowRow.selected]);
-        });
-        settings.connect('changed::panel-window', () => {
-            windowRow.selected = Math.max(0, windowKeys.indexOf(settings.get_string('panel-window')));
-        });
-        behaviour.add(windowRow);
 
         const positions = new Gtk.StringList();
         positions.append('Left');
@@ -203,6 +190,56 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         // its own Connect/Disconnect, since every profile signs in to its own
         // Claude account.
         this._addAboutGroup(page);
+    }
+
+    // Adds the "Panel reflects" group: one switch per selector in the
+    // panel-windows list (any combination; the panel shows one gauge per
+    // matched window, tagged when there is more than one). The switches and
+    // the setting are kept in sync both ways, like the combo rows above; GTK
+    // does not re-notify an unchanged `active`, so the round trip settles.
+    _addPanelWindowsGroup(page, settings) {
+        const group = new Adw.PreferencesGroup({
+            title: 'Panel reflects',
+            description: 'Which usage windows the top bar shows. Turn on more than one ' +
+                'to show them side by side, each with a short tag (5h, 7d, model name).',
+        });
+        page.add(group);
+
+        const rows = [
+            ['five-hour', '5-hour window', ''],
+            ['seven-day', '7-day window', 'All models.'],
+            ['scoped', 'Per-model 7-day windows', 'Every model-specific limit, e.g. Fable.'],
+            ['max', 'Most constrained', 'Whichever window has the highest usage.'],
+            ['worst', 'Worst active limit', 'Highest severity among the active limits; surfaces a maxed-out per-model window.'],
+        ];
+        const switches = new Map();
+        const selected = () => new Set(settings.get_strv('panel-windows'));
+        let syncing = false;
+        for (const [key, title, subtitle] of rows) {
+            const row = new Adw.SwitchRow({title, subtitle});
+            row.active = selected().has(key);
+            row.connect('notify::active', () => {
+                if (syncing)
+                    return;
+                const on = PANEL_SELECTORS.filter(k => switches.get(k)?.active);
+                settings.set_strv('panel-windows', on);
+            });
+            switches.set(key, row);
+            group.add(row);
+        }
+        settings.connect('changed::panel-windows', () => {
+            const on = selected();
+            syncing = true;
+            for (const [key, row] of switches)
+                row.active = on.has(key);
+            syncing = false;
+        });
+
+        // Text between the gauges when several are shown. Blank keeps a plain
+        // gap. Applied live, keystroke by keystroke.
+        const dividerRow = new Adw.EntryRow({title: 'Divider between windows (e.g. | or ·, blank for a plain gap)'});
+        settings.bind('panel-divider', dividerRow, 'text', Gio.SettingsBindFlags.DEFAULT);
+        group.add(dividerRow);
     }
 
     // Adds a "Claude profiles" group: one expandable row per configured

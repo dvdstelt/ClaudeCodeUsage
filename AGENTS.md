@@ -16,19 +16,31 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   (its `UsageClient`, panel block, and popup section); `ClaudeUsageIndicator`
   owns one `ProfileView` per configured profile, plus the shared panel icon,
   poll timer, and countdown. The panel shows a Claude icon once, then one
-  block per profile (ring/bar, percentage, reset countdown, tier label), each
-  independently toggleable via GSettings (the toggles apply to every profile
-  uniformly). A small chip (e.g. "TE") tags each panel block only when more
-  than one profile is configured.
-- `src/prefs.js` — Adwaita preferences (element toggles, panel window, refresh
-  interval, the "Claude profiles" list), bound to GSettings. Each profile row
+  block per profile: one `PanelGauge` (ring/bar, percentage, reset countdown)
+  per usage window selected by `panel-windows`, keyed by window like the
+  popup meters so gauges are reused across polls, then the tier label. Each
+  element is independently toggleable via GSettings (the toggles apply to
+  every gauge of every profile uniformly). With several gauges in one block
+  each carries a short window tag ("5h", "7d", model name) and the optional
+  `panel-divider` text sits between them; a small chip
+  (e.g. "TE") tags each profile block only when more than one profile is
+  configured.
+- `src/prefs.js` — Adwaita preferences (element toggles, the "Panel reflects"
+  window switches, refresh interval, the "Claude profiles" list), bound to
+  GSettings. Each profile row
   carries its own PKCE sign-in (`_addSignInRows`): a status line that reads
   "Using Claude Code", "Connected", or "Not connected", plus Connect, a field
   for the pasted code, and Disconnect.
 - `src/schemas/` — GSettings schema (`org.gnome.shell.extensions.claude-usage`).
   Keys: `show-icon`/`show-percentage`/`show-tier`/`show-reset` (bool),
   `panel-gauge` (`ring`|`bar`|`none`),
-  `panel-window` (`five-hour`|`seven-day`|`max`|`worst`), `poll-seconds` (30-600),
+  `panel-windows` (`as`, any of `five-hour`|`seven-day`|`scoped`|`max`|`worst`;
+  one panel gauge per matched window, merged and shown in role order),
+  `panel-window` (deprecated single-valued predecessor, read once by
+  `migratePanelWindows()` to seed `panel-windows`), `panel-divider` (string
+  drawn before every gauge but the first of a block; default `' '`, and any
+  blank/whitespace value hides it so only the box spacing separates gauges),
+  `poll-seconds` (30-600),
   `panel-position` (`left`|`center`|`right`) + `panel-index` (0-20, where the
   indicator sits in that box; applied live by re-registering it in `_place()`),
   `toggle-menu` (`as`, keyboard shortcut that opens the popup; empty = unbound,
@@ -70,9 +82,12 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   `prefs.js` so the values are defined once. No shell imports.
 - `src/lib/usageModel.js` — pure data-shaping: turns the usage payload into the
   ordered list of windows the popup renders (`normalizeWindows`, preferring the
-  self-describing `limits[]` array and falling back to the legacy flat keys) and
-  the extra-usage money block (`normalizeSpend`). No GI or shell imports, so it
-  is unit-testable under plain `node` (see `tools/test-usageModel.mjs`).
+  self-describing `limits[]` array and falling back to the legacy flat keys),
+  the extra-usage money block (`normalizeSpend`), and the panel's window
+  selection (`selectPanelWindows` over the `panel-windows` selectors,
+  `windowTag` for the short panel tags, `migratePanelWindows` for the
+  `panel-window` upgrade). No GI or shell imports, so it is unit-testable
+  under plain `node` (see `tools/test-usageModel.mjs`).
 - `src/stylesheet.css` — `cu-*` classes for the indicator and popup.
 - `src/icons/` — panel icon (`claude-spark.svg`) and popup logo
   (`octopus.png`).

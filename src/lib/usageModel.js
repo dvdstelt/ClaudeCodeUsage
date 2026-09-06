@@ -212,3 +212,92 @@ export function normalizeSpend(usage) {
     }
     return null;
 }
+
+// ---- panel window selection ----
+
+// Selectors the `panel-windows` setting accepts, in the order prefs writes
+// them. Each picks zero or more of the normalised windows for the panel.
+export const PANEL_SELECTORS = ['five-hour', 'seven-day', 'scoped', 'max', 'worst'];
+
+// One-time upgrade from the single-valued `panel-window` key: if the user had
+// chosen a window there and has never touched `panel-windows`, seed the new
+// list with that choice so the panel keeps showing what it did. Duck-typed
+// settings (only get_user_value/get_string/set_strv), so it stays GI-free.
+export function migratePanelWindows(settings) {
+    if (settings.get_user_value('panel-windows') !== null)
+        return;
+    if (settings.get_user_value('panel-window') === null)
+        return;
+    const old = settings.get_string('panel-window');
+    if (PANEL_SELECTORS.includes(old))
+        settings.set_strv('panel-windows', [old]);
+}
+
+// The windows the panel should show for a list of selectors: the union of
+// what each selector picks, de-duplicated by key and kept in the windows'
+// own (role) order so the panel always reads session → weekly → per-model.
+// `worstScore(w)` ranks windows for the 'worst' selector (the caller supplies
+// it because the burn-rate severity model lives in the shell code). Falls
+// back to the first window when nothing matched, so a selection that the
+// current API response cannot satisfy still shows something.
+export function selectPanelWindows(windows, selectors, worstScore = w => Number(w.utilization) || 0) {
+    if (!Array.isArray(windows) || !windows.length)
+        return [];
+    const picked = new Set();
+    const highest = pool => pool.reduce((best, w) =>
+        (Number(w.utilization) || 0) > (Number(best.utilization) || 0) ? w : best);
+    for (const sel of selectors ?? []) {
+        switch (sel) {
+        case 'five-hour': {
+            const w = windows.find(x => x.role === 'session');
+            if (w)
+                picked.add(w.key);
+            break;
+        }
+        case 'seven-day': {
+            const w = windows.find(x => x.role === 'weekly');
+            if (w)
+                picked.add(w.key);
+            break;
+        }
+        case 'scoped':
+            for (const w of windows) {
+                if (w.role === 'scoped')
+                    picked.add(w.key);
+            }
+            break;
+        case 'max':
+            picked.add(highest(windows).key);
+            break;
+        case 'worst': {
+            const active = windows.filter(w => w.isActive);
+            const pool = active.length ? active : windows;
+            const w = pool.reduce((best, x) => (worstScore(x) > worstScore(best) ? x : best));
+            picked.add(w.key);
+            break;
+        }
+        default:
+            // Unknown selector (a future value, or a typo in dconf): ignore.
+        }
+    }
+    const out = windows.filter(w => picked.has(w.key));
+    return out.length ? out : [windows[0]];
+}
+
+// Short tag shown before a panel gauge when several windows share the panel:
+// "5h", "7d", or the model name of a per-model window ("7-day Fable" → "Fable").
+export function windowTag(w) {
+    switch (w?.role) {
+    case 'session':
+        return '5h';
+    case 'weekly':
+        return '7d';
+    case 'scoped':
+        return String(w.label ?? '')
+            .replace(/^7-day\s+/, '')
+            .replace(/\s+·.*$/, '')
+            .replace(/^\((.*)\)$/, '$1') || '7d';
+    default:
+        return String(w?.label ?? '');
+    }
+}

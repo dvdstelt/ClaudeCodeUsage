@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import {
     normalizeWindows, normalizeSpend, apiSeverityLevel, limitLabel, limitKey,
+    selectPanelWindows, windowTag, migratePanelWindows, PANEL_SELECTORS,
 } from '../src/lib/usageModel.js';
 
 let passed = 0;
@@ -118,6 +119,83 @@ test('normalizeSpend falls back to extra_usage scaled by decimal_places', () => 
 test('normalizeSpend returns null when spend is disabled and no extra_usage', () => {
     assert.equal(normalizeSpend({spend: {enabled: false}}), null);
     assert.equal(normalizeSpend({}), null);
+});
+
+// --- panel window selection ---
+const liveWindows = normalizeWindows(live);
+const keys = ws => ws.map(w => w.key);
+const SESSION = 'limit:session:session';
+const WEEKLY = 'limit:weekly_all:weekly';
+const FABLE = 'limit:weekly_scoped:weekly:Fable';
+
+test('selectPanelWindows: each selector alone picks the expected window', () => {
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, ['five-hour'])), [SESSION]);
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, ['seven-day'])), [WEEKLY]);
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, ['scoped'])), [FABLE]);
+    // max: Fable is at 100%
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, ['max'])), [FABLE]);
+    // worst: only Fable is active, so it wins regardless of score
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, ['worst'], () => 0)), [FABLE]);
+});
+
+test('selectPanelWindows: union keeps role order and drops duplicates', () => {
+    // Switch order in the selection must not change the panel order.
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, ['scoped', 'five-hour', 'seven-day'])),
+        [SESSION, WEEKLY, FABLE]);
+    // worst and scoped both resolve to Fable: shown once.
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, ['scoped', 'worst'])), [FABLE]);
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, PANEL_SELECTORS)), [SESSION, WEEKLY, FABLE]);
+});
+
+test('selectPanelWindows: worst uses the caller score over the active pool, else all', () => {
+    // No active windows: the score decides across every window.
+    const calm = liveWindows.map(w => ({...w, isActive: false}));
+    const scoreSession = w => (w.role === 'session' ? 99 : 0);
+    assert.deepEqual(keys(selectPanelWindows(calm, ['worst'], scoreSession)), [SESSION]);
+});
+
+test('selectPanelWindows: unknown selectors ignored, nothing matched falls back to the first window', () => {
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, ['bogus', 'five-hour'])), [SESSION]);
+    const noScoped = liveWindows.filter(w => w.role !== 'scoped');
+    assert.deepEqual(keys(selectPanelWindows(noScoped, ['scoped'])), [SESSION]);
+    assert.deepEqual(keys(selectPanelWindows(liveWindows, [])), [SESSION]);
+    assert.deepEqual(selectPanelWindows([], ['five-hour']), []);
+    assert.deepEqual(selectPanelWindows(null, ['five-hour']), []);
+});
+
+test('windowTag: short tags for the panel', () => {
+    assert.deepEqual(liveWindows.map(windowTag), ['5h', '7d', 'Fable']);
+    assert.equal(windowTag({role: 'scoped', label: '7-day Cinder Cove · Api'}), 'Cinder Cove');
+    assert.equal(windowTag({role: 'scoped', label: '7-day (scoped)'}), 'scoped');
+    assert.equal(windowTag({role: 'other', label: 'Usage'}), 'Usage');
+});
+
+test('migratePanelWindows: seeds the list from the old single choice exactly once', () => {
+    const fake = (user, seed) => {
+        const writes = [];
+        return {
+            writes,
+            get_user_value: k => (k in user ? user[k] : null),
+            get_string: k => user[k],
+            set_strv: (k, v) => writes.push([k, v]),
+        };
+    };
+    // Old choice present, new key untouched → migrate.
+    let s = fake({'panel-window': 'seven-day'});
+    migratePanelWindows(s);
+    assert.deepEqual(s.writes, [['panel-windows', ['seven-day']]]);
+    // New key already set by the user → leave it alone.
+    s = fake({'panel-window': 'seven-day', 'panel-windows': ['five-hour']});
+    migratePanelWindows(s);
+    assert.deepEqual(s.writes, []);
+    // Old key at its default → nothing to migrate.
+    s = fake({});
+    migratePanelWindows(s);
+    assert.deepEqual(s.writes, []);
+    // Garbage in the old key is not carried over.
+    s = fake({'panel-window': 'nope'});
+    migratePanelWindows(s);
+    assert.deepEqual(s.writes, []);
 });
 
 console.log(`\n${passed} tests passed`);
