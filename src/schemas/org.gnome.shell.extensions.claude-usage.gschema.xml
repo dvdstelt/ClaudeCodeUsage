@@ -30,7 +30,7 @@
     <key name="show-reset" type="b">
       <default>false</default>
       <summary>Show the time until reset</summary>
-      <description>Display, in the panel, the time left before the window selected by panel-window resets.</description>
+      <description>Display, in the panel, the time left before each window shown there (see panel-windows) resets.</description>
     </key>
     <key name="show-profile-chip" type="b">
       <default>true</default>
@@ -46,7 +46,17 @@
       </choices>
       <default>"five-hour"</default>
       <summary>Panel usage window</summary>
-      <description>Which usage window the panel ring and percentage reflect: the 5-hour window, the 7-day window, the one with the highest utilization (max), or the worst active limit by severity (worst) — the latter surfaces a maxed-out per-model window such as Fable.</description>
+      <description>Deprecated: superseded by panel-windows, which can hold several selectors. Read once, on first run after the upgrade, to seed panel-windows with the previous single choice.</description>
+    </key>
+    <key name="panel-windows" type="as">
+      <default>['five-hour']</default>
+      <summary>Panel usage windows</summary>
+      <description>Which usage windows the panel shows, one gauge (ring/bar, percentage, reset countdown) per window, tagged "5h"/"7d"/model name when more than one is shown. Accepted selectors: five-hour (the 5-hour window), seven-day (the 7-day all-models window), scoped (every per-model 7-day window, e.g. Fable), max (whichever window has the highest utilization), worst (the worst active limit by severity — surfaces a maxed-out per-model window). Unknown selectors are ignored and a window matched by several selectors is shown once. Empty falls back to the first window.</description>
+    </key>
+    <key name="panel-divider" type="s">
+      <default>' '</default>
+      <summary>Divider between panel gauges</summary>
+      <description>Text placed between the gauges when the panel shows more than one window (see panel-windows), e.g. "|" or "·". Blank or whitespace-only (the default) leaves a plain gap.</description>
     </key>
     <key name="panel-position" type="s">
       <choices>

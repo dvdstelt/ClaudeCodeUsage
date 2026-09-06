@@ -26,7 +26,7 @@ See [install](#install) instructions
 - **Rate projection.** Meters, the ring, and the panel percentage are colored by your projected end-of-window usage at the current burn rate, so a fast burn turns amber or red before you actually hit the limit. When a window is on track to run out early, the caption spells it out (for example `burning fast — out in ~1h20m at this rate`); a window that is merely rising shows `on track for ~N% by reset`.
 - **Live countdown.** The "resets in" captions tick down between polls, counting in seconds once a window is less than a minute from resetting.
 - **Theme aware.** The ring track follows your panel text color, so it stays legible on both light and dark themes.
-- **Configurable** refresh interval and choice of which window the panel reflects (5-hour, 7-day, or whichever is most constrained).
+- **Configurable** refresh interval and choice of which windows the panel shows: any mix of the 5-hour window, the 7-day window, per-model windows such as Fable, whichever is most constrained, or the worst active limit, side by side.
 
 ## Requirements
 
@@ -71,7 +71,7 @@ gnome-extensions prefs claude-usage@dvdstelt.github.io
 ```
 
 - **Panel elements** - show or hide the icon, percentage, time until reset, and tier, and choose the usage gauge (circle, bar, or none).
-- **Panel reflects** - which window the ring, percentage, and time-until-reset countdown track: the 5-hour window, the 7-day window, or whichever is most constrained.
+- **Panel reflects** - which windows get a gauge (ring or bar, percentage, time-until-reset countdown) in the panel. Switch on any combination of the 5-hour window, the 7-day window, the per-model 7-day windows (e.g. Fable), whichever window is most constrained, and the worst active limit. With more than one switched on the gauges sit side by side, each with a short tag (5h, 7d, or the model name), separated by an optional divider character of your choice (for example `|` or `·`; blank for a plain gap).
 - **Panel position** - which section of the top bar the indicator sits in (left, center, or right), and where it sits among the other items there. Changes apply immediately.
 - **Shortcut to open the popup** - an optional keyboard shortcut that opens the usage dropdown, the way `Super+S` opens GNOME's quick settings. Not set by default; click the row to record one, or the clear button to remove it.
 - **Refresh interval** - how often to poll for updated usage (30 to 600 seconds; default 300).

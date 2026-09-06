@@ -43,6 +43,25 @@
 .cu-panel-block {
     spacing: 5px;
 }
+/* One profile's gauges (one per selected usage window), side by side. */
+.cu-panel-gauges {
+    spacing: 8px;
+}
+.cu-panel-gauge {
+    spacing: 5px;
+}
+/* Window tag ("5h", "7d", "Fable") before a gauge; only shown with several
+   gauges. No pill background, so it reads differently from the profile chip. */
+.cu-panel-wtag {
+    font-size: 8pt;
+    font-weight: bold;
+    color: rgba(128, 128, 128, 1.0);
+}
+/* Optional text divider (panel-divider) before every gauge but the first. */
+.cu-panel-divider {
+    font-size: 9pt;
+    color: rgba(128, 128, 128, 1.0);
+}
 .cu-panel-sep {
     width: 1px;
     height: 14px;

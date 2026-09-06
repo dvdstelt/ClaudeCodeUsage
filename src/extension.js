@@ -15,12 +15,16 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {UsageClient, UsageError, SignedOutError, defaultConfigDir} from './lib/usageClient.js';
 import {loadProfiles, ensureProfiles} from './lib/profiles.js';
-import {normalizeWindows, normalizeSpend} from './lib/usageModel.js';
+import {normalizeWindows, normalizeSpend, selectPanelWindows, windowTag, migratePanelWindows} from './lib/usageModel.js';
 
 const USAGE_SETTINGS_URL = 'https://claude.ai/settings/usage';
 
 // Severity levels, least to most severe.
 const LEVEL_RANK = {ok: 0, warn: 1, crit: 2};
+
+// Gauge-map key for the single '…'/'—' gauge shown while a profile has no
+// windows to display (before the first fetch, or when signed out).
+const PLACEHOLDER_GAUGE = '';
 
 // Severity from a raw utilization %: how full the bucket is right now.
 function utilLevel(util) {
@@ -413,6 +417,94 @@ class PanelBar {
     }
 }
 
+// One usage window's gauge in the panel: an optional divider (the
+// panel-divider text, on every gauge but the first of a block), an optional
+// short tag ("5h", "7d", "Fable") so several windows can share a profile's
+// block, then the ring or bar, the percentage, and the reset countdown. A
+// ProfileView keeps one per window the panel-windows setting selects. Mirrors
+// Meter/PanelBar: owns its actors and tears them down explicitly.
+class PanelGauge {
+    constructor() {
+        this.root = new St.BoxLayout({style_class: 'cu-panel-gauge'});
+        this._divider = new St.Label({text: '', style_class: 'cu-panel-divider', y_align: Clutter.ActorAlign.CENTER});
+        this._divider.visible = false;
+        this._tag = new St.Label({text: '', style_class: 'cu-panel-wtag', y_align: Clutter.ActorAlign.CENTER});
+        this._tag.visible = false;
+        this._ring = new Ring();
+        this._bar = new PanelBar();
+        this._pct = new St.Label({text: '…', style_class: 'cu-panel-pct', y_align: Clutter.ActorAlign.CENTER});
+        this._reset = new St.Label({text: '', style_class: 'cu-panel-reset', y_align: Clutter.ActorAlign.CENTER});
+        this.root.add_child(this._divider);
+        this.root.add_child(this._tag);
+        this.root.add_child(this._ring);
+        this.root.add_child(this._bar.root);
+        this.root.add_child(this._pct);
+        this.root.add_child(this._reset);
+    }
+
+    // The divider sits before every gauge but the first of a block; blank or
+    // whitespace-only text hides it, so the box spacing alone makes the gap.
+    setDivider(text, visible) {
+        this._divider.text = text ?? '';
+        this._divider.visible = !!visible && this._divider.text.trim() !== '';
+    }
+
+    // The tag only earns its width when more than one gauge is on screen, so
+    // the caller says whether to show it.
+    setTag(text, visible) {
+        this._tag.text = text ?? '';
+        this._tag.visible = !!visible && this._tag.text !== '';
+    }
+
+    setValue(util, level, resetsAt) {
+        this._pct.text = `${Math.round(util)}%`;
+        this._pct.style_class = `cu-panel-pct ${levelClass(level)}`;
+        this._reset.text = resetsAt ? compactReset(resetsAt) : '';
+        this._ring.setValue(util, level);
+        this._bar.setValue(util, level);
+    }
+
+    setUnknown() {
+        this._pct.text = '—';
+        this._pct.style_class = 'cu-panel-pct';
+        this._reset.text = '';
+        this._ring.setUnknown();
+        this._bar.setUnknown();
+    }
+
+    // A failed refresh with nothing better to show: '!' in the warning colour.
+    setError() {
+        this.setUnknown();
+        this._pct.text = '!';
+        this._pct.style_class = 'cu-panel-pct cu-warn';
+    }
+
+    applyVisibility(settings) {
+        const gauge = settings.get_string('panel-gauge');
+        this._ring.visible = gauge === 'ring';
+        this._bar.root.visible = gauge === 'bar';
+        this._pct.visible = settings.get_boolean('show-percentage');
+        this._reset.visible = settings.get_boolean('show-reset');
+    }
+
+    destroy() {
+        this._divider?.destroy();
+        this._tag?.destroy();
+        this._ring?.destroy();
+        this._bar?.destroy();
+        this._pct?.destroy();
+        this._reset?.destroy();
+        this.root?.destroy();
+        this._divider = null;
+        this._tag = null;
+        this._ring = null;
+        this._bar = null;
+        this._pct = null;
+        this._reset = null;
+        this.root = null;
+    }
+}
+
 // Everything specific to one Claude Code profile (one config directory / one
 // account): its own token client, panel block, and popup section. Multiple
 // instances are orchestrated by ClaudeUsageIndicator, which shares a single
@@ -449,17 +541,16 @@ class ProfileView {
             });
             this._panelBlock.add_child(this._chip);
         }
-        this._ring = new Ring();
-        this._panelBar = new PanelBar();
-        this._panelPct = new St.Label({text: '…', style_class: 'cu-panel-pct', y_align: Clutter.ActorAlign.CENTER});
-        this._panelReset = new St.Label({text: '', style_class: 'cu-panel-reset', y_align: Clutter.ActorAlign.CENTER});
+        // One PanelGauge per window the panel-windows setting selects, keyed
+        // by window key (like the popup meters) so gauges survive across
+        // polls. Until the first fetch a single placeholder gauge shows '…'.
+        this._gaugesBox = new St.BoxLayout({style_class: 'cu-panel-gauges'});
+        this._gauges = new Map();
         this._panelTier = new St.Label({text: '', style_class: 'cu-panel-tier', y_align: Clutter.ActorAlign.CENTER});
-        this._panelBlock.add_child(this._ring);
-        this._panelBlock.add_child(this._panelBar.root);
-        this._panelBlock.add_child(this._panelPct);
-        this._panelBlock.add_child(this._panelReset);
+        this._panelBlock.add_child(this._gaugesBox);
         this._panelBlock.add_child(this._panelTier);
         panelBox.add_child(this._panelBlock);
+        this._gauge(PLACEHOLDER_GAUGE);
 
         // ---- popup section ----
         this._section = new St.BoxLayout({
@@ -505,12 +596,9 @@ class ProfileView {
     }
 
     applyVisibility() {
-        const gauge = this._settings.get_string('panel-gauge');
-        this._ring.visible = gauge === 'ring';
-        this._panelBar.root.visible = gauge === 'bar';
-        this._panelPct.visible = this._settings.get_boolean('show-percentage');
+        for (const gauge of this._gauges.values())
+            gauge.applyVisibility(this._settings);
         this._panelTier.visible = this._settings.get_boolean('show-tier');
-        this._panelReset.visible = this._settings.get_boolean('show-reset');
         // The chip is only built with more than one profile, and is then
         // toggleable — some people would rather not spend the panel width.
         if (this._chip)
@@ -692,54 +780,59 @@ class ProfileView {
         return maxLevel(windowLevel(w.utilization, w.resetsAt, w.totalSeconds), w.apiLevel);
     }
 
-    // The worst window to surface in the panel: the highest severity among the
-    // active limits (or all of them if none are marked active), breaking ties by
-    // utilization. This is how a 100% scoped window (e.g. Fable) reaches the bar
-    // even when the session and weekly totals are calm.
-    _worstWindow(windows) {
-        const active = windows.filter(w => w.isActive);
-        const pool = active.length ? active : windows;
-        const score = w => LEVEL_RANK[this._windowLevel(w)] * 1000 + (Number(w.utilization) || 0);
-        return pool.reduce((best, w) => (score(w) > score(best) ? w : best));
+    // Which normalised usage windows the panel shows, per the panel-windows
+    // preference (any mix of 5-hour / 7-day / per-model / max / worst, merged
+    // and kept in role order). The 'worst' selector ranks by the computed
+    // severity, then utilization, over the active limits — that is how a 100%
+    // scoped window (e.g. Fable) reaches the panel even when the session and
+    // weekly totals are calm.
+    _panelWindows() {
+        return selectPanelWindows(this._windows, this._settings.get_strv('panel-windows'),
+            w => LEVEL_RANK[this._windowLevel(w)] * 1000 + (Number(w.utilization) || 0));
     }
 
-    // Which normalised usage window the panel reflects, per the panel-window
-    // preference.
-    _panelWindow() {
-        const windows = this._windows;
-        if (!windows || !windows.length)
-            return null;
-        switch (this._settings.get_string('panel-window')) {
-        case 'seven-day':
-            return windows.find(w => w.role === 'weekly') ?? windows[0];
-        case 'worst':
-            return this._worstWindow(windows);
-        case 'max':
-            return windows.reduce((best, w) =>
-                (Number(w.utilization) || 0) > (Number(best.utilization) || 0) ? w : best);
-        case 'five-hour':
-        default:
-            return windows.find(w => w.role === 'session') ?? windows[0];
+    // The gauge for a window key, created (with the current visibility
+    // toggles applied) on first use.
+    _gauge(key) {
+        let gauge = this._gauges.get(key);
+        if (!gauge) {
+            gauge = new PanelGauge();
+            gauge.applyVisibility(this._settings);
+            this._gaugesBox.add_child(gauge.root);
+            this._gauges.set(key, gauge);
         }
+        return gauge;
     }
 
+    // Re-syncs the panel gauges with the selected windows: one gauge per
+    // window, reused across polls, reordered to match, and torn down when a
+    // window drops out of the selection. With nothing to show (no data yet,
+    // or signed out) a single placeholder gauge reads '—'.
     renderPanel() {
-        const sel = this._panelWindow();
-        if (!sel || !Number.isFinite(sel.utilization)) {
-            this._panelPct.text = '—';
-            this._panelPct.style_class = 'cu-panel-pct';
-            this._ring.setUnknown();
-            this._panelBar.setUnknown();
-            this._panelReset.text = '';
+        const sel = this._panelWindows();
+        const wanted = new Set(sel.length ? sel.map(w => w.key) : [PLACEHOLDER_GAUGE]);
+        for (const [key, gauge] of this._gauges) {
+            if (!wanted.has(key)) {
+                gauge.destroy();
+                this._gauges.delete(key);
+            }
+        }
+        if (!sel.length) {
+            this._gauge(PLACEHOLDER_GAUGE).setUnknown();
             return;
         }
-        const util = sel.utilization;
-        const level = this._windowLevel(sel);
-        this._panelPct.text = `${Math.round(util)}%`;
-        this._panelPct.style_class = `cu-panel-pct ${levelClass(level)}`;
-        this._panelReset.text = sel.resetsAt ? compactReset(sel.resetsAt) : '';
-        this._ring.setValue(util, level);
-        this._panelBar.setValue(util, level);
+        const divider = this._settings.get_string('panel-divider');
+        sel.forEach((w, i) => {
+            const gauge = this._gauge(w.key);
+            this._gaugesBox.set_child_at_index(gauge.root, i);
+            gauge.setDivider(divider, i > 0);
+            if (Number.isFinite(w.utilization))
+                gauge.setValue(w.utilization, this._windowLevel(w), w.resetsAt);
+            else
+                gauge.setUnknown();
+            // Tags only when several windows share the block.
+            gauge.setTag(windowTag(w), sel.length > 1);
+        });
     }
 
     _renderError(e) {
@@ -758,11 +851,8 @@ class ProfileView {
             logError(e, `claude-usage: rate limited for "${this.profile.label}", keeping last data`);
             return;
         }
-        this._panelPct.text = '!';
-        this._panelPct.style_class = 'cu-panel-pct cu-warn';
-        this._ring.setUnknown();
-        this._panelBar.setUnknown();
-        this._panelReset.text = '';
+        for (const gauge of this._gauges.values())
+            gauge.setError();
         let msg;
         if (e instanceof UsageError && e.status === 401)
             msg = 'Session expired. Sign in via Claude Code or Settings.';
@@ -793,11 +883,8 @@ class ProfileView {
         this._panelTier.text = '';
         this._extra.visible = false;
 
-        this._panelPct.text = '—';
-        this._panelPct.style_class = 'cu-panel-pct';
-        this._ring.setUnknown();
-        this._panelBar.setUnknown();
-        this._panelReset.text = '';
+        // Windows are cleared above, so this collapses to the placeholder.
+        this.renderPanel();
 
         this._error.text = e.message;
         this._error.style_class = 'cu-error cu-dim';
@@ -817,11 +904,11 @@ class ProfileView {
         this._meters.clear();
 
         // Panel block contents, then the block itself.
-        this._ring?.destroy();
-        this._panelBar?.destroy();
+        for (const gauge of this._gauges.values())
+            gauge.destroy();
+        this._gauges.clear();
+        this._gaugesBox?.destroy();
         this._chip?.destroy();
-        this._panelPct?.destroy();
-        this._panelReset?.destroy();
         this._panelTier?.destroy();
         this._panelSep?.destroy();
         this._panelBlock?.destroy();
@@ -834,11 +921,8 @@ class ProfileView {
         this._metersBox?.destroy();
         this._section?.destroy();
 
-        this._ring = null;
-        this._panelBar = null;
+        this._gaugesBox = null;
         this._chip = null;
-        this._panelPct = null;
-        this._panelReset = null;
         this._panelTier = null;
         this._panelSep = null;
         this._panelBlock = null;
@@ -863,6 +947,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._path = path;
         this._settings = settings;
         this._openPreferences = openPreferences;
+        // Carry a pre-1.5 single "panel reflects" choice into panel-windows.
+        migratePanelWindows(settings);
         this._busy = false;
         this._cancellable = new Gio.Cancellable();
         this._lastFetchMs = 0;
@@ -899,7 +985,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             'changed::show-tier', () => this._applyVisibility(),
             'changed::show-reset', () => this._applyVisibility(),
             'changed::show-profile-chip', () => this._applyVisibility(),
-            'changed::panel-window', () => this._renderAllPanels(),
+            'changed::panel-windows', () => this._renderAllPanels(),
+            'changed::panel-divider', () => this._renderAllPanels(),
             'changed::poll-seconds', () => this._startTimer(),
             // Signing in (or out) from prefs changes the token source; refetch.
             'changed::access-token', () => this._refresh(true),
