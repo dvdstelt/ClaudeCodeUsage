@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- The panel can show several usage windows at once: "Panel reflects" is now a
+  set of switches (5-hour, 7-day, per-model, most constrained, worst active
+  limit), with one gauge per matched window, tagged when more than one is shown.
+- An optional divider (e.g. `|` or `·`) between the panel gauges, under
+  "Panel reflects" in preferences. Blank, the default, keeps a plain gap.
+
 ## 1.4.2 - 2026-08-28
 
 ### Changed
