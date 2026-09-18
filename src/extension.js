@@ -26,8 +26,10 @@ const USAGE_SETTINGS_URL = 'https://claude.ai/settings/usage';
 // Severity levels, least to most severe.
 const LEVEL_RANK = {ok: 0, warn: 1, crit: 2};
 
-// Gauge-map key for the single '…'/'—' gauge shown while a profile has no
-// windows to display (before the first fetch, or when signed out).
+// Gauge-map key for the single gauge shown while a profile has no windows to
+// display: '…' before the first fetch, '—' when signed out, or the extra-usage
+// percentage for an account that reports spend but no rate-limit windows
+// (pooled/enterprise seats).
 const PLACEHOLDER_GAUGE = '';
 
 // Severity from a raw utilization %: how full the bucket is right now.
@@ -776,6 +778,11 @@ class ProfileView {
         // Normalised windows from the last render, cached for the panel
         // selector and the between-poll countdown.
         this._windows = [];
+        // Normalised "extra usage"/credit spend block from the last render,
+        // used as the panel's gauge fallback when there are no rate-limit
+        // windows at all (pooled/enterprise seats don't expose one).
+        this._spend = null;
+        this._spendMeter = null;
         this._meterBindings = [];
         // key (from the usage model) -> Meter, so meters are reused across
         // polls and torn down only when the API stops reporting that window.
@@ -916,6 +923,7 @@ class ProfileView {
         applyInline(this._pill, style, 'pill');
         for (const meter of this._meters.values())
             meter.applyStyle(style);
+        this._spendMeter?.applyStyle(style);
         this._setLineState(this._extra, 'extra', this._extraState);
         this._setLineState(this._error, 'error', this._errorState);
         applyInline(this._panelBlock, style, 'panel-block');
@@ -1059,23 +1067,44 @@ class ProfileView {
         this.renderPanel();
     }
 
-    // Renders the "extra usage" line from the normalised spend block (the new
-    // structured `spend` object, or the legacy `extra_usage` fallback), color-
-    // ing it by the API's severity.
+    // Renders the "extra usage" block from the normalised spend block (the
+    // new structured `spend` object, or the legacy `extra_usage` fallback).
+    // When it carries a numeric percent, it gets the same bar treatment as a
+    // rate-limit window (so pooled/enterprise accounts, which have no
+    // per-window limits at all, still get a bar); otherwise it falls back to
+    // a plain line, colored by the API's severity.
     _renderSpend(usage) {
         const spend = normalizeSpend(usage);
+        this._spend = spend;
+        const parts = [spend?.used, spend?.limit].filter(Boolean);
+
+        if (spend && Number.isFinite(spend.percent)) {
+            if (!this._spendMeter) {
+                this._spendMeter = new Meter('Extra usage');
+                this._spendMeter.applyStyle(this._style);
+                this._section.insert_child_below(this._spendMeter.root, this._error);
+            }
+            this._spendMeter.setValue(spend.percent, parts.join(' / '), spend.level);
+            this._extra.visible = false;
+            return;
+        }
+        this._dropSpendMeter();
+
         if (!spend) {
             this._extra.visible = false;
             this._setLineState(this._extra, 'extra', null);
             return;
         }
-        const parts = [spend.used, spend.limit].filter(Boolean);
-        let text = `Extra usage: ${parts.join(' / ')}`;
-        if (spend.percent !== null)
-            text += ` (${spend.percent}%)`;
-        this._extra.text = text;
+        this._extra.text = `Extra usage: ${parts.join(' / ')}`;
         this._setLineState(this._extra, 'extra', spend.level);
         this._extra.visible = true;
+    }
+
+    // Removes the extra-usage meter, once the API stops reporting a spend
+    // percent or the profile signs out.
+    _dropSpendMeter() {
+        this._spendMeter?.destroy();
+        this._spendMeter = null;
     }
 
     // Pairs a meter with its normalised window so the live countdown can
@@ -1229,9 +1258,15 @@ class ProfileView {
             this._groups[i].setReset(failed ? null : g.resetsAt);
             if (!g.windows.length) {
                 // The placeholder keeps its '…' until the first result is in.
+                // An account with no rate-limit windows at all (pooled or
+                // enterprise seats) shows its extra-usage percentage instead
+                // of '—'; spend has no reset, so the group has no countdown.
                 const gauge = this._gauges.get(PLACEHOLDER_GAUGE);
+                const spend = this._spend;
                 if (failed)
                     gauge.setError();
+                else if (spend && Number.isFinite(spend.percent))
+                    gauge.setValue(spend.percent, spend.level);
                 else if (this.lastResult !== null)
                     gauge.setUnknown();
                 return;
@@ -1293,6 +1328,8 @@ class ProfileView {
         this._meters.clear();
         this._meterBindings = [];
         this._windows = [];
+        this._spend = null;
+        this._dropSpendMeter();
         this._lastUsage = null;
 
         this._subtitle.text = 'Signed out';
@@ -1318,6 +1355,9 @@ class ProfileView {
         for (const meter of this._meters.values())
             meter.destroy();
         this._meters.clear();
+        this._spendMeter?.destroy();
+        this._spendMeter = null;
+        this._spend = null;
 
         // Panel block contents, then the block itself.
         for (const gauge of this._gauges.values())
