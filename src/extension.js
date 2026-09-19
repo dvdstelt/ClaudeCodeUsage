@@ -429,6 +429,11 @@ class ProfileView {
         // Normalised windows from the last render, cached for the panel
         // selector and the between-poll countdown.
         this._windows = [];
+        // Normalised "extra usage"/credit spend block from the last render,
+        // used as the panel's gauge fallback when there are no rate-limit
+        // windows at all (pooled/enterprise seats don't expose one).
+        this._spend = null;
+        this._spendMeter = null;
         this._meterBindings = [];
         // key (from the usage model) -> Meter, so meters are reused across
         // polls and torn down only when the API stops reporting that window.
@@ -612,21 +617,38 @@ class ProfileView {
         this.lastResult = 'ok';
     }
 
-    // Renders the "extra usage" line from the normalised spend block (the new
-    // structured `spend` object, or the legacy `extra_usage` fallback), colour-
-    // ing it by the API's severity.
+    // Renders the "extra usage" block from the normalised spend block (the
+    // new structured `spend` object, or the legacy `extra_usage` fallback).
+    // When it carries a numeric percent, it gets the same bar treatment as a
+    // rate-limit window (so pooled/enterprise accounts, which have no
+    // per-window limits at all, still get a bar); otherwise it falls back to
+    // a plain colour-coded text line.
     _renderSpend(usage) {
         const spend = normalizeSpend(usage);
+        this._spend = spend;
+
+        if (spend && Number.isFinite(spend.percent)) {
+            if (!this._spendMeter) {
+                this._spendMeter = new Meter('Extra usage');
+                this._section.insert_child_below(this._spendMeter.root, this._error);
+            }
+            const parts = [spend.used, spend.limit].filter(Boolean);
+            this._spendMeter.setValue(spend.percent, parts.join(' / '), spend.level);
+            this._spendMeter.root.visible = true;
+            this._extra.visible = false;
+            return;
+        }
+
+        if (this._spendMeter)
+            this._spendMeter.root.visible = false;
+
         if (!spend) {
             this._extra.visible = false;
             this._extra.style_class = 'cu-extra';
             return;
         }
         const parts = [spend.used, spend.limit].filter(Boolean);
-        let text = `Extra usage: ${parts.join(' / ')}`;
-        if (spend.percent !== null)
-            text += ` (${spend.percent}%)`;
-        this._extra.text = text;
+        this._extra.text = `Extra usage: ${parts.join(' / ')}`;
         this._extra.style_class = `cu-extra ${levelClass(spend.level)}`;
         this._extra.visible = true;
     }
@@ -725,21 +747,35 @@ class ProfileView {
 
     renderPanel() {
         const sel = this._panelWindow();
-        if (!sel || !Number.isFinite(sel.utilization)) {
-            this._panelPct.text = '—';
-            this._panelPct.style_class = 'cu-panel-pct';
-            this._ring.setUnknown();
-            this._panelBar.setUnknown();
-            this._panelReset.text = '';
+        if (sel && Number.isFinite(sel.utilization)) {
+            const util = sel.utilization;
+            const level = this._windowLevel(sel);
+            this._panelPct.text = `${Math.round(util)}%`;
+            this._panelPct.style_class = `cu-panel-pct ${levelClass(level)}`;
+            this._panelReset.text = sel.resetsAt ? compactReset(sel.resetsAt) : '';
+            this._ring.setValue(util, level);
+            this._panelBar.setValue(util, level);
             return;
         }
-        const util = sel.utilization;
-        const level = this._windowLevel(sel);
-        this._panelPct.text = `${Math.round(util)}%`;
-        this._panelPct.style_class = `cu-panel-pct ${levelClass(level)}`;
-        this._panelReset.text = sel.resetsAt ? compactReset(sel.resetsAt) : '';
-        this._ring.setValue(util, level);
-        this._panelBar.setValue(util, level);
+
+        // No rate-limit windows at all (pooled/enterprise seats don't expose
+        // one) — fall back to the extra-usage/credit spend percentage so the
+        // panel still shows a gauge instead of "—". Spend has no reset date.
+        const spend = this._spend;
+        if (spend && Number.isFinite(spend.percent)) {
+            this._panelPct.text = `${Math.round(spend.percent)}%`;
+            this._panelPct.style_class = `cu-panel-pct ${levelClass(spend.level)}`;
+            this._panelReset.text = '';
+            this._ring.setValue(spend.percent, spend.level);
+            this._panelBar.setValue(spend.percent, spend.level);
+            return;
+        }
+
+        this._panelPct.text = '—';
+        this._panelPct.style_class = 'cu-panel-pct';
+        this._ring.setUnknown();
+        this._panelBar.setUnknown();
+        this._panelReset.text = '';
     }
 
     _renderError(e) {
@@ -785,6 +821,7 @@ class ProfileView {
         this._meters.clear();
         this._meterBindings = [];
         this._windows = [];
+        this._spend = null;
         this._lastUsage = null;
 
         this._subtitle.text = 'Signed out';
@@ -792,6 +829,8 @@ class ProfileView {
         this._pill.visible = false;
         this._panelTier.text = '';
         this._extra.visible = false;
+        if (this._spendMeter)
+            this._spendMeter.root.visible = false;
 
         this._panelPct.text = '—';
         this._panelPct.style_class = 'cu-panel-pct';
@@ -815,6 +854,9 @@ class ProfileView {
         for (const meter of this._meters.values())
             meter.destroy();
         this._meters.clear();
+        this._spendMeter?.destroy();
+        this._spendMeter = null;
+        this._spend = null;
 
         // Panel block contents, then the block itself.
         this._ring?.destroy();
