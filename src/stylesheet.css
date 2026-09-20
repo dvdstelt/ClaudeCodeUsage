@@ -1,10 +1,44 @@
+/* ===== shared by the panel and the popup ("Shared UI") ===== */
+/* Usage colors: the panel's bar gauge and the popup's meters (the panel's
+   ring paints the same values itself), then the text that goes with them. */
+.cu-panel-bar-fill.cu-ok,   .cu-fill.cu-ok   { background-color: #33d17a; }
+.cu-panel-bar-fill.cu-warn, .cu-fill.cu-warn { background-color: #ff7800; }
+.cu-panel-bar-fill.cu-crit, .cu-fill.cu-crit { background-color: #e01b24; }
+.cu-panel-pct.cu-warn, .cu-extra.cu-warn { color: #ffa348; }
+.cu-panel-pct.cu-crit, .cu-extra.cu-crit { color: #ff6b6b; }
+/* The unfilled part of a gauge or meter. */
+.cu-panel-bar, .cu-track { background-color: rgba(128, 128, 128, 0.3); }
+/* Common values: one default each for the quiet text, the bars' corners and
+   the percentages (the fourth, the color of the dividers and separator lines,
+   is a different property per class, so it is with those below). Each class
+   also has a value of its own that follows the shared one until changed. */
+.cu-panel-tier, .cu-panel-chip, .cu-panel-wtag, .cu-panel-reset,
+.cu-subtitle, .cu-caption, .cu-extra, .cu-updated, .cu-error.cu-dim { color: rgba(128, 128, 128, 1.0); }
+.cu-panel-bar, .cu-panel-bar-fill, .cu-track, .cu-fill { border-radius: 99px; }
+.cu-panel-pct, .cu-meter-pct { font-weight: bold; }
+
 /* ===== panel button ===== */
 .cu-panel {
-    spacing: 5px;
     padding: 0 4px;
+}
+/* Space between elements: the icon and the profiles, one profile's elements,
+   and a gauge's tag, ring or bar, and percentage. */
+.cu-panel, .cu-panel-block, .cu-panel-gauge {
+    spacing: 5px;
+}
+/* Space between gauges: one profile's gauges (one per selected usage window)
+   sit side by side, in groups of windows that reset together:
+   [divider] gauges… [countdown]. */
+.cu-panel-gauges, .cu-panel-group {
+    spacing: 8px;
 }
 .cu-panel-icon {
     icon-size: 16px;
+}
+/* Tier icons are symbolic, so the shell paints them in this color: the
+   orange of the Claude icon (claude-spark.svg). */
+.cu-panel-tier-icon {
+    color: #D97757;
 }
 .cu-ring {
     width: 18px;
@@ -13,65 +47,47 @@
 .cu-panel-bar {
     width: 34px;
     height: 10px;
-    border-radius: 99px;
-    background-color: rgba(128, 128, 128, 0.3);
 }
 .cu-panel-bar-fill {
     height: 10px;
-    border-radius: 99px;
-    background-color: #3584e4;
 }
-.cu-panel-bar-fill.cu-ok   { background-color: #33d17a; }
-.cu-panel-bar-fill.cu-warn { background-color: #ff7800; }
-.cu-panel-bar-fill.cu-crit { background-color: #e01b24; }
+/* No font size: the percentage has the panel's until one is set. */
 .cu-panel-pct {
-    font-weight: bold;
     font-feature-settings: "tnum";
 }
-.cu-panel-pct.cu-warn { color: #ffa348; }
-.cu-panel-pct.cu-crit { color: #ff6b6b; }
 .cu-panel-reset {
     font-size: 9pt;
-    color: rgba(128, 128, 128, 1.0);
     font-feature-settings: "tnum";
 }
 .cu-panel-tier {
     font-size: 9pt;
-    color: rgba(128, 128, 128, 1.0);
     font-weight: bold;
-}
-.cu-panel-block {
-    spacing: 5px;
-}
-/* One profile's gauges (one per selected usage window), side by side. */
-.cu-panel-gauges {
-    spacing: 8px;
-}
-.cu-panel-gauge {
-    spacing: 5px;
 }
 /* Window tag ("5h", "7d", "Fable") before a gauge; only shown with several
    gauges. No pill background, so it reads differently from the profile chip. */
 .cu-panel-wtag {
     font-size: 8pt;
     font-weight: bold;
-    color: rgba(128, 128, 128, 1.0);
 }
-/* Optional text divider (panel-divider) before every gauge but the first. */
-.cu-panel-divider {
+/* The lead divider (after the icon / tier, and between profiles) and the
+   window divider (between gauge groups): a 1px line for "|", else text. Both
+   kinds share one color, which is also the popup's separator lines' (the
+   shared "Divider and separator color"). */
+.cu-panel-divider-text {
     font-size: 9pt;
-    color: rgba(128, 128, 128, 1.0);
+    color: rgba(128, 128, 128, 0.5);
 }
-.cu-panel-sep {
+.cu-panel-divider-line {
     width: 1px;
     height: 14px;
+    background-color: rgba(128, 128, 128, 0.5);
+}
+.cu-panel-divider-profile {
     margin: 0 6px;
-    background-color: rgba(128, 128, 128, 0.35);
 }
 .cu-panel-chip {
     font-size: 8pt;
     font-weight: bold;
-    color: rgba(128, 128, 128, 1.0);
     padding: 1px 4px;
     border-radius: 4px;
     background-color: rgba(128, 128, 128, 0.18);
@@ -87,7 +103,23 @@
     icon-size: 36px;
 }
 .cu-title { font-weight: bold; font-size: 12pt; }
-.cu-subtitle { font-size: 9pt; color: rgba(128, 128, 128, 1.0); }
+/* Secondary text: one size for every quiet line (their color is the shared
+   muted text color, at the top). */
+.cu-subtitle, .cu-caption, .cu-extra, .cu-error, .cu-updated { font-size: 9pt; }
+/* Separator lines: the same line, with the same space above and below it,
+   under a profile's header, between profiles, and over the actions and the
+   footer. Their color is the panel dividers' too. */
+.cu-profile-section-divider, .cu-actions, .cu-footer {
+    border-top: 1px solid rgba(128, 128, 128, 0.5);
+    margin-top: 10px;
+    padding-top: 10px;
+}
+.cu-profile-header {
+    spacing: 11px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.5);
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+}
 .cu-pill {
     font-size: 9pt;
     font-weight: bold;
@@ -98,71 +130,37 @@
     border: 1px solid rgba(230, 97, 0, 0.4);
 }
 
-.cu-section {
-    font-size: 8pt;
-    font-weight: bold;
-    color: rgba(128, 128, 128, 1.0);
-    margin: 10px 0 8px 0;
-}
-
 /* ===== per-profile sections ===== */
 .cu-profile-section {
     margin-bottom: 2px;
-}
-.cu-profile-section-divider {
-    border-top: 1px solid rgba(128, 128, 128, 0.25);
-    padding-top: 12px;
-    margin-top: 10px;
-}
-.cu-profile-header {
-    spacing: 11px;
-    padding-bottom: 12px;
-    margin-bottom: 6px;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
 }
 
 /* ===== meters ===== */
 .cu-meter { spacing: 5px; margin-bottom: 11px; }
 .cu-meter-row { spacing: 8px; }
 .cu-meter-name { font-size: 11pt; }
-.cu-meter-pct { font-weight: bold; font-feature-settings: "tnum"; }
+.cu-meter-pct { font-feature-settings: "tnum"; }
 .cu-track {
     width: 300px;
     height: 7px;
-    border-radius: 99px;
-    background-color: rgba(128, 128, 128, 0.3);
 }
 .cu-fill {
     height: 7px;
-    border-radius: 99px;
-    background-color: #3584e4;
 }
-.cu-fill.cu-ok   { background-color: #33d17a; }
-.cu-fill.cu-warn { background-color: #ff7800; }
-.cu-fill.cu-crit { background-color: #e01b24; }
-.cu-caption { font-size: 9pt; color: rgba(128, 128, 128, 1.0); }
 
 .cu-extra {
-    font-size: 9.5pt;
-    color: rgba(128, 128, 128, 1.0);
     margin: 2px 0 4px 0;
 }
-.cu-extra.cu-warn { color: #ffa348; }
-.cu-extra.cu-crit { color: #ff6b6b; }
+/* A signed-out note uses the same slot with .cu-dim, which mutes it to the
+   muted text color: it's a state, not a fault. */
 .cu-error {
-    font-size: 9.5pt;
     color: #ff9c8a;
     margin: 4px 0;
 }
-/* Signed-out note: same slot as an error, but muted — it's a state, not a fault. */
-.cu-error.cu-dim { color: rgba(128, 128, 128, 1.0); }
 
 /* ===== actions ===== */
 .cu-actions {
     spacing: 8px;
-    margin-top: 10px;
-    padding-top: 12px;
-    border-top: 1px solid rgba(128, 128, 128, 0.25);
 }
 .cu-btn {
     padding: 8px 10px;
@@ -170,25 +168,17 @@
     text-align: center;
     font-weight: bold;
     font-size: 10pt;
-    background-color: rgba(128, 128, 128, 0.18);
-    border: 1px solid rgba(128, 128, 128, 0.25);
-}
-.cu-btn:hover { background-color: rgba(128, 128, 128, 0.30); }
-.cu-btn-pri {
     background-color: #3584e4;
     border: 1px solid transparent;
     color: #ffffff;
 }
-.cu-btn-pri:hover { background-color: #4a90e0; }
+.cu-btn:hover { background-color: #4a90e0; }
 
 /* ===== footer ===== */
 .cu-footer {
     spacing: 8px;
-    margin-top: 10px;
-    padding-top: 9px;
-    border-top: 1px solid rgba(128, 128, 128, 0.25);
 }
-.cu-updated { font-size: 9pt; color: rgba(128, 128, 128, 1.0); margin-top: 6px; }
+.cu-updated { margin-top: 6px; }
 .cu-refresh {
     font-size: 9pt;
     font-weight: bold;

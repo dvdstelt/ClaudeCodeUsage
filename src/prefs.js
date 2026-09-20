@@ -15,6 +15,8 @@ import {
 import {loadProfiles, saveProfiles, makeProfileId, labelForDirName, ensureProfiles} from './lib/profiles.js';
 import {getToken, setToken, clearToken} from './lib/tokenStore.js';
 import {PANEL_SELECTORS, migratePanelWindows} from './lib/usageModel.js';
+import {UI_PAGES} from './lib/uiStyle.js';
+import {buildUiStylePage} from './lib/uiStylePage.js';
 
 const KOFI_URL = 'https://ko-fi.com/dvdstelt';
 
@@ -74,10 +76,14 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         migratePanelWindows(settings);
 
         const page = new Adw.PreferencesPage({
-            title: 'Panel',
+            title: 'General',
             icon_name: 'preferences-system-symbolic',
         });
         window.add(page);
+        // The other tabs: the sizes, spacing and colors of the top bar and
+        // of the popup, and before those what the two have in common.
+        for (const {id} of UI_PAGES)
+            window.add(buildUiStylePage(settings, window, id).page);
 
         // ---- which elements appear in the panel ----
         const elements = new Adw.PreferencesGroup({
@@ -89,7 +95,8 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         const toggles = [
             ['show-icon', 'Claude icon'],
             ['show-percentage', 'Usage percentage'],
-            ['show-tier', 'Subscription tier'],
+            ['show-tier', 'Subscription tier label'],
+            ['show-tier-icon', 'Subscription tier icon'],
         ];
         for (const [key, title] of toggles) {
             const row = new Adw.SwitchRow({title});
@@ -108,7 +115,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         // Time-until-reset for each window chosen under "Panel reflects" below.
         const resetRow = new Adw.SwitchRow({
             title: 'Time until reset',
-            subtitle: 'Show the time left before each window shown in the panel resets.',
+            subtitle: 'Show the time left before each window shown in the panel resets (once for the 7-day windows, which reset together).',
         });
         elements.add(resetRow);
         settings.bind('show-reset', resetRow, 'active', Gio.SettingsBindFlags.DEFAULT);
@@ -134,6 +141,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         elements.add(gaugeRow);
 
         // ---- which usage windows the panel shows ----
+        // (What divides them, the two divider texts, is under "Top-Bar UI".)
         this._addPanelWindowsGroup(page, settings);
 
         // ---- behaviour ----
@@ -234,12 +242,6 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
                 row.active = on.has(key);
             syncing = false;
         });
-
-        // Text between the gauges when several are shown. Blank keeps a plain
-        // gap. Applied live, keystroke by keystroke.
-        const dividerRow = new Adw.EntryRow({title: 'Divider between windows (e.g. | or ·, blank for a plain gap)'});
-        settings.bind('panel-divider', dividerRow, 'text', Gio.SettingsBindFlags.DEFAULT);
-        group.add(dividerRow);
     }
 
     // Adds a "Claude profiles" group: one expandable row per configured

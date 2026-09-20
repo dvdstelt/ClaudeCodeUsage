@@ -11,8 +11,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The panel can show several usage windows at once: "Panel reflects" is now a
   set of switches (5-hour, 7-day, per-model, most constrained, worst active
   limit), with one gauge per matched window, tagged when more than one is shown.
-- An optional divider (e.g. `|` or `·`) between the panel gauges, under
-  "Panel reflects" in preferences. Blank, the default, keeps a plain gap.
+- Two dividers, under "Dividers" in the preferences' "Top-Bar UI" tab. The
+  window divider sits between the panel's usage windows (blank, the default,
+  keeps a plain gap).
+  The lead divider sits between the leading elements (Claude icon, profile
+  tag, subscription tier) and the gauges, and between profiles; it defaults
+  to a thin vertical line. For either, a single `|` draws that line, other
+  text (e.g. `·`) is shown as typed, and blank shows nothing.
+- A "Subscription tier icon" panel option. The icons are the same orange as
+  the Claude icon. Tiers without their own icon (e.g. Max 5x / 20x) use the
+  base tier's; a tier with no artwork shows no icon.
+- Three new tabs in preferences, "Shared UI", "Top-Bar UI" and "Popup UI",
+  with the sizes, spacing, padding, fonts and colors of the indicator and of
+  the popup, applied as you change them. A changed value gets its own reset
+  button, and each tab's "Reset all" (with a confirmation) puts that tab back
+  to the defaults. "Shared UI" holds what the top bar and the popup have in
+  common: the usage colors, and four common values (muted text color, divider
+  and separator color, bar corner radius, percentage font weight) that each
+  element's own value on the other two tabs follows until it is changed
+  there. Among the rest: the model name before a per-model gauge (e.g.
+  "Fable") can be styled apart from the "5h" / "7d" tags, the time until
+  reset can show its numbers in bold and its units regular ("Bold numbers"),
+  and one line style covers every separator in the popup.
+- The usage percentage in the panel can sit on top of its gauge (inside the
+  circle, or over the bar) instead of next to it, and has a font size and a
+  "Show the % sign" switch of its own: "Usage percentage" under "Top-Bar UI".
+
+### Changed
+- The 7-day and per-model 7-day windows reset together (within 5 minutes of
+  each other), so the panel now shows them as one group: no divider between
+  them, and the time until reset once, after the last of them.
+- "Subscription tier" is now "Subscription tier label", and it sits at the
+  left, after the Claude icon, instead of at the far right.
+- The separator between profiles in the panel is now the lead divider, so it
+  can be changed or removed.
+- The first preferences tab is now "General" (it was "Panel").
+- A few popup defaults were evened out so that values meant to be the same
+  are: every separator line has 10px above and below it, and the extra-usage
+  and error lines are 9pt like the other secondary text. The circle gauge's
+  track is the same grey as the bar gauge's. The popup's separator lines take
+  the panel dividers' color (grey at 50% instead of 25%), now that the two
+  are one shared value.
+- Less work between polls: the panel is only laid out again when what it
+  shows changes, unchanged gauges are not repainted, and the popup's
+  captions are only updated while it is open.
+
+### Fixed
+- After a failed refresh the panel's `!` no longer reverts to the old values
+  on the next countdown tick; it stays until a refresh succeeds.
 
 ## 1.4.1 - 2026-08-26
 
