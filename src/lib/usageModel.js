@@ -17,7 +17,7 @@ export const GROUP_SECONDS = {session: FIVE_HOUR_SECONDS, weekly: SEVEN_DAY_SECO
 
 // Map the API's severity string to the extension's internal level. Unknown or
 // missing severities are treated as calm ('ok') so a new value never trips the
-// gauge red on its own — the computed burn model still colours it.
+// gauge red on its own — the computed burn model still colors it.
 export function apiSeverityLevel(sev) {
     switch (sev) {
     case 'critical':
@@ -282,6 +282,72 @@ export function selectPanelWindows(windows, selectors, worstScore = w => Number(
     }
     const out = windows.filter(w => picked.has(w.key));
     return out.length ? out : [windows[0]];
+}
+
+// Reset times this close together count as the same reset. The API stamps
+// each window separately, so the "same" weekly reset can differ by fractions
+// of a second (or be written with another offset notation).
+const RESET_MERGE_MS = 5 * 60 * 1000;
+
+const isWeekly = w => w?.role === 'weekly' || w?.role === 'scoped';
+
+// Epoch ms of a reset timestamp, or null when it is missing or unparseable.
+function resetMs(iso) {
+    const t = iso ? Date.parse(iso) : NaN;
+    return Number.isNaN(t) ? null : t;
+}
+
+// Splits the panel's windows into display groups: [{windows, resetsAt}]. The
+// panel draws its window divider between groups (never inside one) and shows
+// one reset countdown per group, after its last gauge, from `resetsAt`.
+//
+// The 7-day all-models window and the per-model 7-day windows are one weekly
+// window in practice, so they share a group when they reset together: a
+// weekly/scoped window joins the first weekly group whose reference reset is
+// within RESET_MERGE_MS of its own. The reference is the first known reset in
+// the group (so a chain of near-misses cannot drift), and it is the group's
+// `resetsAt`. A window with no reset time (a per-model window nobody has used
+// yet) has no countdown of its own, so it just joins the latest weekly group.
+// Every other window (the 5-hour session, unknown roles) is its own group.
+export function groupPanelWindows(windows) {
+    const groups = [];
+    const weekly = []; // {group, ms} for each weekly group, in order
+    for (const w of windows ?? []) {
+        const ms = resetMs(w.resetsAt);
+        if (isWeekly(w)) {
+            const home = ms === null
+                ? weekly.at(-1)
+                : weekly.find(g => g.ms === null || Math.abs(g.ms - ms) <= RESET_MERGE_MS);
+            if (home) {
+                home.group.windows.push(w);
+                if (home.ms === null && ms !== null) {
+                    home.ms = ms;
+                    home.group.resetsAt = w.resetsAt;
+                }
+                continue;
+            }
+        }
+        const group = {windows: [w], resetsAt: ms === null ? null : w.resetsAt};
+        groups.push(group);
+        if (isWeekly(w))
+            weekly.push({group, ms});
+    }
+    return groups;
+}
+
+// ---- subscription tier icon ----
+
+// Tiers that have artwork in icons/ (tier-<name>-symbolic.svg). Add a name
+// here when adding its file, e.g. 'max-20x' for tier-max-20x-symbolic.svg.
+export const TIER_ICONS = ['free', 'pro', 'max', 'team', 'enterprise'];
+
+// Icon name for a tier label ("MAX 20x"), most specific first: "max-20x",
+// then the base tier "max" (so a multiplier tier without artwork of its own
+// uses its base tier's). null when neither has artwork: the panel then shows
+// no tier icon at all.
+export function tierIconName(label) {
+    const slug = String(label ?? '').trim().toLowerCase().replace(/\s+/g, '-');
+    return [slug, slug.split('-')[0]].find(name => TIER_ICONS.includes(name)) ?? null;
 }
 
 // Short tag shown before a panel gauge when several windows share the panel:
