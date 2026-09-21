@@ -1,9 +1,6 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
-// Pin Soup 3.0 inline: some systems still have the 2.4 typelib installed, and
-// without a version the prefs process (where the shell hasn't already loaded
-// Soup) could pick the wrong one.
-import Soup from 'gi://Soup?version=3.0';
+import Soup from 'gi://Soup';
 
 import {getToken, setToken, migrateLegacyToken} from './tokenStore.js';
 import {
@@ -130,6 +127,17 @@ export class UsageError extends Error {
         this.name = 'UsageError';
         this.status = status;
         this.body = body;
+    }
+
+    // The API's own explanation, when the body is the usual
+    // {"error": {"message": "..."}} shape. Null when the body isn't JSON or
+    // doesn't look like that, so callers can fall back to a generic message.
+    apiMessage() {
+        try {
+            return JSON.parse(this.body)?.error?.message || null;
+        } catch {
+            return null;
+        }
     }
 }
 
