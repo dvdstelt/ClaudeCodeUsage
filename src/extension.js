@@ -766,6 +766,12 @@ class ProfileView {
         let msg;
         if (e instanceof UsageError && e.status === 401)
             msg = 'Session expired. Sign in via Claude Code or Settings.';
+        else if (e instanceof UsageError && e.status === 403)
+            // The API refuses to serve usage for this account: typically no
+            // active subscription, even though auth itself succeeded (so the
+            // profile fetch above can still show a stale plan/tier). Prefer
+            // the API's own wording since it may name the actual cause.
+            msg = e.apiMessage() || 'No active Claude subscription for this account.';
         else if (e instanceof UsageError && e.status === 429)
             msg = 'Rate limited by Claude; will retry shortly.';
         else

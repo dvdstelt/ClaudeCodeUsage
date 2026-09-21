@@ -128,6 +128,17 @@ export class UsageError extends Error {
         this.status = status;
         this.body = body;
     }
+
+    // The API's own explanation, when the body is the usual
+    // {"error": {"message": "..."}} shape. Null when the body isn't JSON or
+    // doesn't look like that, so callers can fall back to a generic message.
+    apiMessage() {
+        try {
+            return JSON.parse(this.body)?.error?.message || null;
+        } catch {
+            return null;
+        }
+    }
 }
 
 // A profile has no usable credentials: no Claude Code login in its directory
