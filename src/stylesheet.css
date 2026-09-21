@@ -40,6 +40,8 @@
 .cu-panel-tier-icon {
     color: #D97757;
 }
+/* The ring sets its own size from the "Size" UI setting (Ring.applyStyle);
+   this only states that default for anything that renders before it. */
 .cu-ring {
     width: 18px;
     height: 18px;
