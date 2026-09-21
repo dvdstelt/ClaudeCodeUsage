@@ -25,7 +25,7 @@ See [install](#install) instructions
 - **Dropdown** with per-window meters: the 5-hour window, the 7-day window, and any per-model 7-day windows the API reports (for example Opus and Sonnet), discovered automatically.
 - **Rate projection.** Meters, the ring, and the panel percentage are colored by your projected end-of-window usage at the current burn rate, so a fast burn turns amber or red before you actually hit the limit. When a window is on track to run out early, the caption spells it out (for example `burning fast — out in ~1h20m at this rate`); a window that is merely rising shows `on track for ~N% by reset`.
 - **Live countdown.** The "resets in" captions tick down between polls, counting in seconds once a window is less than a minute from resetting.
-- **Theme aware.** The ring track follows your panel text color, so it stays legible on both light and dark themes.
+- **Themeable.** The gauge track is a neutral grey that reads on both light and dark themes, and every color, size, spacing and font in the panel and the popup can be changed from the UI preference tabs.
 - **Configurable** refresh interval and choice of which windows the panel shows: any mix of the 5-hour window, the 7-day window, per-model windows such as Fable, whichever is most constrained, or the worst active limit, side by side.
 
 ## Requirements
