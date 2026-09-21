@@ -217,7 +217,9 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         const group = new Adw.PreferencesGroup({
             title: 'Panel reflects',
             description: 'Which usage windows the top bar shows. Turn on more than one ' +
-                'to show them side by side, each with a short tag (5h, 7d, model name).',
+                'to show them side by side, each with a short tag (5h, 7d, model name). ' +
+                'With none of them on, the panel falls back to the 5-hour window; to show ' +
+                'no gauge at all, set the gauge to "None" and turn off the usage percentage.',
         });
         page.add(group);
 
