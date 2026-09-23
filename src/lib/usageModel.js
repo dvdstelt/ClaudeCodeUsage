@@ -17,7 +17,7 @@ export const GROUP_SECONDS = {session: FIVE_HOUR_SECONDS, weekly: SEVEN_DAY_SECO
 
 // Map the API's severity string to the extension's internal level. Unknown or
 // missing severities are treated as calm ('ok') so a new value never trips the
-// gauge red on its own — the computed burn model still colours it.
+// gauge red on its own — the computed burn model still colors it.
 export function apiSeverityLevel(sev) {
     switch (sev) {
     case 'critical':
@@ -211,4 +211,159 @@ export function normalizeSpend(usage) {
         }
     }
     return null;
+}
+
+// ---- panel window selection ----
+
+// Selectors the `panel-windows` setting accepts, in the order prefs writes
+// them. Each picks zero or more of the normalised windows for the panel.
+export const PANEL_SELECTORS = ['five-hour', 'seven-day', 'scoped', 'max', 'worst'];
+
+// One-time upgrade from the single-valued `panel-window` key: if the user had
+// chosen a window there and has never touched `panel-windows`, seed the new
+// list with that choice so the panel keeps showing what it did. Duck-typed
+// settings (only get_user_value/get_string/set_strv), so it stays GI-free.
+export function migratePanelWindows(settings) {
+    if (settings.get_user_value('panel-windows') !== null)
+        return;
+    if (settings.get_user_value('panel-window') === null)
+        return;
+    const old = settings.get_string('panel-window');
+    if (PANEL_SELECTORS.includes(old))
+        settings.set_strv('panel-windows', [old]);
+}
+
+// The windows the panel should show for a list of selectors: the union of
+// what each selector picks, de-duplicated by key and kept in the windows'
+// own (role) order so the panel always reads session → weekly → per-model.
+// `worstScore(w)` ranks windows for the 'worst' selector (the caller supplies
+// it because the burn-rate severity model lives in the shell code). Falls
+// back to the first window when nothing matched, so a selection that the
+// current API response cannot satisfy still shows something.
+export function selectPanelWindows(windows, selectors, worstScore = w => Number(w.utilization) || 0) {
+    if (!Array.isArray(windows) || !windows.length)
+        return [];
+    const picked = new Set();
+    const highest = pool => pool.reduce((best, w) =>
+        (Number(w.utilization) || 0) > (Number(best.utilization) || 0) ? w : best);
+    for (const sel of selectors ?? []) {
+        switch (sel) {
+        case 'five-hour': {
+            const w = windows.find(x => x.role === 'session');
+            if (w)
+                picked.add(w.key);
+            break;
+        }
+        case 'seven-day': {
+            const w = windows.find(x => x.role === 'weekly');
+            if (w)
+                picked.add(w.key);
+            break;
+        }
+        case 'scoped':
+            for (const w of windows) {
+                if (w.role === 'scoped')
+                    picked.add(w.key);
+            }
+            break;
+        case 'max':
+            picked.add(highest(windows).key);
+            break;
+        case 'worst': {
+            const active = windows.filter(w => w.isActive);
+            const pool = active.length ? active : windows;
+            const w = pool.reduce((best, x) => (worstScore(x) > worstScore(best) ? x : best));
+            picked.add(w.key);
+            break;
+        }
+        default:
+            // Unknown selector (a future value, or a typo in dconf): ignore.
+        }
+    }
+    const out = windows.filter(w => picked.has(w.key));
+    return out.length ? out : [windows[0]];
+}
+
+// Reset times this close together count as the same reset. The API stamps
+// each window separately, so the "same" weekly reset can differ by fractions
+// of a second (or be written with another offset notation).
+const RESET_MERGE_MS = 5 * 60 * 1000;
+
+const isWeekly = w => w?.role === 'weekly' || w?.role === 'scoped';
+
+// Epoch ms of a reset timestamp, or null when it is missing or unparseable.
+function resetMs(iso) {
+    const t = iso ? Date.parse(iso) : NaN;
+    return Number.isNaN(t) ? null : t;
+}
+
+// Splits the panel's windows into display groups: [{windows, resetsAt}]. The
+// panel draws its window divider between groups (never inside one) and shows
+// one reset countdown per group, after its last gauge, from `resetsAt`.
+//
+// The 7-day all-models window and the per-model 7-day windows are one weekly
+// window in practice, so they share a group when they reset together: a
+// weekly/scoped window joins the first weekly group whose reference reset is
+// within RESET_MERGE_MS of its own. The reference is the first known reset in
+// the group (so a chain of near-misses cannot drift), and it is the group's
+// `resetsAt`. A window with no reset time (a per-model window nobody has used
+// yet) has no countdown of its own, so it just joins the latest weekly group.
+// Every other window (the 5-hour session, unknown roles) is its own group.
+export function groupPanelWindows(windows) {
+    const groups = [];
+    const weekly = []; // {group, ms} for each weekly group, in order
+    for (const w of windows ?? []) {
+        const ms = resetMs(w.resetsAt);
+        if (isWeekly(w)) {
+            const home = ms === null
+                ? weekly.at(-1)
+                : weekly.find(g => g.ms === null || Math.abs(g.ms - ms) <= RESET_MERGE_MS);
+            if (home) {
+                home.group.windows.push(w);
+                if (home.ms === null && ms !== null) {
+                    home.ms = ms;
+                    home.group.resetsAt = w.resetsAt;
+                }
+                continue;
+            }
+        }
+        const group = {windows: [w], resetsAt: ms === null ? null : w.resetsAt};
+        groups.push(group);
+        if (isWeekly(w))
+            weekly.push({group, ms});
+    }
+    return groups;
+}
+
+// ---- subscription tier icon ----
+
+// Tiers that have artwork in icons/ (tier-<name>-symbolic.svg). Add a name
+// here when adding its file, e.g. 'max-20x' for tier-max-20x-symbolic.svg.
+export const TIER_ICONS = ['free', 'pro', 'max', 'team', 'enterprise'];
+
+// Icon name for a tier label ("MAX 20x"), most specific first: "max-20x",
+// then the base tier "max" (so a multiplier tier without artwork of its own
+// uses its base tier's). null when neither has artwork: the panel then shows
+// no tier icon at all.
+export function tierIconName(label) {
+    const slug = String(label ?? '').trim().toLowerCase().replace(/\s+/g, '-');
+    return [slug, slug.split('-')[0]].find(name => TIER_ICONS.includes(name)) ?? null;
+}
+
+// Short tag shown before a panel gauge when several windows share the panel:
+// "5h", "7d", or the model name of a per-model window ("7-day Fable" → "Fable").
+export function windowTag(w) {
+    switch (w?.role) {
+    case 'session':
+        return '5h';
+    case 'weekly':
+        return '7d';
+    case 'scoped':
+        return String(w.label ?? '')
+            .replace(/^7-day\s+/, '')
+            .replace(/\s+·.*$/, '')
+            .replace(/^\((.*)\)$/, '$1') || '7d';
+    default:
+        return String(w?.label ?? '');
+    }
 }
