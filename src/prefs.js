@@ -3,7 +3,7 @@ import Gtk from 'gi://Gtk';
 import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import Soup from 'gi://Soup?version=3.0';
+import Soup from 'gi://Soup';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
@@ -19,6 +19,14 @@ import {UI_PAGES} from './lib/uiStyle.js';
 import {buildUiStylePage} from './lib/uiStylePage.js';
 
 const KOFI_URL = 'https://ko-fi.com/dvdstelt';
+
+// Keys that type nothing, so binding them without a modifier steals no input:
+// the function keys (F1-F35, contiguous) and the XF86 media/extra keys, which
+// all sit above 0x1008FF00.
+const XF86_KEY_BASE = 0x1008ff00;
+function isDedicatedKey(keyval) {
+    return (keyval >= Gdk.KEY_F1 && keyval <= Gdk.KEY_F35) || keyval >= XF86_KEY_BASE;
+}
 
 // Gtk.FileDialog predates GJS's automatic async/finish pairing for this
 // class on some GNOME versions, so promisify it explicitly.
@@ -209,7 +217,13 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
         const group = new Adw.PreferencesGroup({
             title: 'Panel reflects',
             description: 'Which usage windows the top bar shows. Turn on more than one ' +
+<<<<<<< HEAD
                 'to show them side by side, each with a short tag (5h, 7d, model name).',
+=======
+                'to show them side by side, each with a short tag (5h, 7d, model name). ' +
+                'With none of them on, the panel falls back to the 5-hour window; to show ' +
+                'no gauge at all, set the gauge to "None" and turn off the usage percentage.',
+>>>>>>> 2ff61bbc32de1c7ea66841678a14b50042b9f74b
         });
         page.add(group);
 
@@ -370,7 +384,7 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
     _buildShortcutRow(settings, window) {
         const row = new Adw.ActionRow({
             title: 'Shortcut to open the popup',
-            subtitle: 'Opens the usage dropdown without the mouse. Not set by default.',
+            subtitle: 'Opens and closes the usage dropdown without the mouse. Needs a modifier, unless it is a function or media key. Not set by default.',
             activatable: true,
         });
 
@@ -443,10 +457,13 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
                 dialog.close();
                 return Gdk.EVENT_STOP;
             }
-            // A modifier on its own, or a plain unmodified key, is not a usable
-            // global shortcut; keep waiting instead of storing something that
-            // would swallow ordinary typing.
-            if (!mask || !Gtk.accelerator_valid(keyval, mask))
+            // Gtk.accelerator_valid() accepts a bare letter, so it cannot be
+            // relied on alone: binding one would swallow ordinary typing
+            // system-wide. Require a modifier, except for keys that produce no
+            // text at all — the function keys and the XF86 media/extra keys are
+            // safe on their own, and are exactly what a keyboard with more than
+            // twelve F-keys is for.
+            if ((!mask && !isDedicatedKey(keyval)) || !Gtk.accelerator_valid(keyval, mask))
                 return Gdk.EVENT_STOP;
 
             const accel = Gtk.accelerator_name_with_keycode(null, keyval, keycode, mask);

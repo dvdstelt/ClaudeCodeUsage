@@ -124,9 +124,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   single profile may claim a pre-per-profile sign-in during migration. Exports
   `claudeCodeCredentialsAvailable(configDir)`, `defaultConfigDir()`
   (`~/.claude`), and `discoverConfigDirs()` (finds `~/.claude` and sibling
-  `~/.claude-*` directories that already hold credentials). Soup is pinned
-  inline via `gi://Soup?version=3.0` (some systems still ship the 2.4
-  typelib).
+  `~/.claude-*` directories that already hold credentials).
 - `src/lib/profiles.js` — the profile list: `loadProfiles`/`saveProfiles`
   (JSON in the `profiles` GSettings key) and `ensureProfiles` (seeds the list
   from `discoverConfigDirs()` once, gated by `profiles-initialized`). Kept
@@ -227,6 +225,12 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
 - `tools/test-uiStylePage.js` — builds all three UI tabs against
   in-memory settings and drives its controls (needs a display and a compiled
   schema; shows no window): `gjs -m tools/test-uiStylePage.js`.
+- `tools/compile-schemas.sh` — recompiles the GSettings schema for a
+  development install, and fails loudly if a key in the XML is missing from the
+  result. A no-op when the compiled file is already current.
+- `tools/git-hooks/` — `post-checkout`, `post-merge`, and `post-rewrite`, each
+  running `compile-schemas.sh`. Enable once per clone with
+  `git config core.hooksPath tools/git-hooks`.
 
 ## Data sources
 
@@ -259,6 +263,30 @@ These are undocumented internal endpoints and may change without notice.
   `resource:///org/gnome/shell` imports so they stay runnable under plain `gjs`
   (both are also imported by `prefs.js` or the tools).
 
+### Never pin a GI version
+
+Import GI libraries unversioned — `import Soup from 'gi://Soup'`, never
+`gi://Soup?version=3.0`, and no `imports.gi.versions` module either. Reviewers
+have asked for this twice now: once to delete a `lib/versions.js` that set
+`imports.gi.versions.Soup`, and again (rejecting 1.4.1) for the inline
+`?version=` spelling of the same thing. It is *not* in the written review
+guidelines, so it will not show up in the checklist — it comes from the human
+reviewer.
+
+The reason it matters: a pin is an assertion, not a preference. If the host
+process has already loaded another version, the import is a fatal error —
+`Error: Version 3.0 of GI module Soup already loaded, cannot load version 2.4`.
+GNOME Shell loads libsoup itself, so a pin can only match (redundant) or
+mismatch (breaks the extension outright on some future GNOME release). There is
+no upside inside the shell.
+
+The tempting reason to add one: on a machine with both the Soup 2.4 and 3.0
+typelibs, plain `gjs` warns "Requiring Soup but it has 2 versions available".
+That warning only appears in standalone `gjs` (i.e. `tools/poll.js`), where
+nothing has preloaded Soup, and it is harmless — GJS still resolves to 3.0.
+Inside the shell and prefs processes Soup 3 is already loaded. Do not "fix" it
+with a pin.
+
 ### Teardown rules
 
 extensions.gnome.org runs a static analysis (Shexli) on every upload, and it
@@ -287,11 +315,21 @@ Symlink `src/` (not the repo root) into the extensions folder:
 
 ```sh
 ln -s "$PWD/src" ~/.local/share/gnome-shell/extensions/claude-usage@dvdstelt.github.io
-glib-compile-schemas "$PWD/src/schemas/"
+git config core.hooksPath tools/git-hooks
+./tools/compile-schemas.sh
 gnome-extensions enable claude-usage@dvdstelt.github.io
 ```
 
 On Wayland a new extension only loads after logging out and back in.
+
+The `core.hooksPath` line matters more than it looks. The extensions folder
+symlinks `src/`, so the code follows every branch switch instantly, but
+`gschemas.compiled` is a gitignored build artifact that nothing regenerates.
+Checking out a branch that adds a GSettings key then leaves the shell reading a
+stale schema, and the extension dies at startup with `GSettings key <name> not
+found in schema …`. The hooks recompile on checkout, merge, and rebase so that
+cannot happen; `./tools/compile-schemas.sh` does it by hand. That error message
+always means "recompile", never a code fault.
 
 ## Release
 

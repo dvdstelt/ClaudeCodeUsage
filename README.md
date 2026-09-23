@@ -25,7 +25,7 @@ See [install](#install) instructions
 - **Dropdown** with per-window meters: the 5-hour window, the 7-day window, and any per-model 7-day windows the API reports (for example Opus and Sonnet), discovered automatically.
 - **Rate projection.** Meters, the ring, and the panel percentage are colored by your projected end-of-window usage at the current burn rate, so a fast burn turns amber or red before you actually hit the limit. When a window is on track to run out early, the caption spells it out (for example `burning fast — out in ~1h20m at this rate`); a window that is merely rising shows `on track for ~N% by reset`.
 - **Live countdown.** The "resets in" captions tick down between polls, counting in seconds once a window is less than a minute from resetting.
-- **Theme aware.** The ring track follows your panel text color, so it stays legible on both light and dark themes.
+- **Themeable.** The gauge track is a neutral grey that reads on both light and dark themes, and every color, size, spacing and font in the panel and the popup can be changed from the UI preference tabs.
 - **Configurable** refresh interval and choice of which windows the panel shows: any mix of the 5-hour window, the 7-day window, per-model windows such as Fable, whichever is most constrained, or the worst active limit, side by side.
 
 ## Requirements
@@ -53,11 +53,20 @@ The extension source lives in `src/`. Symlink that directory into the GNOME exte
 
 ```sh
 git clone https://github.com/dvdstelt/ClaudeCodeUsage.git
-ln -s "$PWD/ClaudeCodeUsage/src" \
+cd ClaudeCodeUsage
+ln -s "$PWD/src" \
   ~/.local/share/gnome-shell/extensions/claude-usage@dvdstelt.github.io
-glib-compile-schemas "$PWD/ClaudeCodeUsage/src/schemas/"
+git config core.hooksPath tools/git-hooks
+./tools/compile-schemas.sh
 gnome-extensions enable claude-usage@dvdstelt.github.io
 ```
+
+The `core.hooksPath` line keeps the compiled GSettings schema in step with
+whatever branch you have checked out. The extensions folder symlinks `src/`, so
+the code follows a branch switch instantly, but the compiled schema is a
+gitignored build artifact - without the hooks, checking out a branch that adds a
+setting leaves the extension failing to start with `GSettings key … not found in
+schema`. Run `./tools/compile-schemas.sh` any time to fix that by hand.
 
 On Wayland a newly installed extension only loads after you log out and back in.
 On X11 you can reload the shell with `Alt+F2`, then `r`, then Enter.
@@ -71,7 +80,7 @@ gnome-extensions prefs claude-usage@dvdstelt.github.io
 ```
 
 - **Panel elements** - show or hide the Claude icon, percentage, time until reset, subscription tier label, and subscription tier icon (Max 5x / 20x use the Max icon; a tier without artwork shows none), and choose the usage gauge (circle, bar, or none).
-- **Panel reflects** - which windows get a gauge (ring or bar, percentage, time-until-reset countdown) in the panel. Switch on any combination of the 5-hour window, the 7-day window, the per-model 7-day windows (e.g. Fable), whichever window is most constrained, and the worst active limit. With more than one switched on the gauges sit side by side, each with a short tag (5h, 7d, or the model name), separated by the window divider. The 7-day windows reset together, so they are shown as one group: no divider between them and a single time-until-reset after the last one.
+- **Panel reflects** - which windows get a gauge (ring or bar, percentage, time-until-reset countdown) in the panel. Switch on any combination of the 5-hour window, the 7-day window, the per-model 7-day windows (e.g. Fable), whichever window is most constrained, and the worst active limit. With more than one switched on the gauges sit side by side, each with a short tag (5h, 7d, or the model name), separated by the window divider. The 7-day windows reset together, so they are shown as one group: no divider between them and a single time-until-reset after the last one. With none of them switched on the panel falls back to the 5-hour window; to show no gauge at all, set the gauge to "None" and turn off the usage percentage under **Panel elements**.
 - **Panel position** - which section of the top bar the indicator sits in (left, center, or right), and where it sits among the other items there. Changes apply immediately.
 - **Shortcut to open the popup** - an optional keyboard shortcut that opens the usage dropdown, the way `Super+S` opens GNOME's quick settings. Not set by default; click the row to record one, or the clear button to remove it.
 - **Refresh interval** - how often to poll for updated usage (30 to 600 seconds; default 300).

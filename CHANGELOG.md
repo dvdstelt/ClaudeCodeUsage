@@ -60,6 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After a failed refresh the panel's `!` no longer reverts to the old values
   on the next countdown tick; it stays until a refresh succeeds.
 
+## 1.4.2 - 2026-08-28
+
+### Changed
+- Internal change for extensions.gnome.org review compliance: the Soup imports
+  no longer pin a version. No user-facing changes.
+
 ## 1.4.1 - 2026-08-26
 
 ### Added
