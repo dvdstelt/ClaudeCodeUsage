@@ -209,7 +209,9 @@ export const UI_STYLE_GROUPS = [
         title: 'Circle gauge',
         page: TOPBAR,
         props: [
-            px('ring.size', 'Size', 18, target('ring', ['width', 'height']), {min: 8}),
+            // No target: the ring sizes itself (Ring.applyStyle -> set_size), like
+            // it paints its own line width and colors.
+            px('ring.size', 'Size', 18, [], {min: 8}),
             px('ring.stroke', 'Line width', 3, [], {min: 1, max: 16}),
         ],
     },

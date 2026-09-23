@@ -88,14 +88,24 @@ test('ids are unique and every prop is well-formed', () => {
 });
 
 // A value only does something if the extension hands its class to
-// applyInline(): by its name there ('panel-tier'), or for the one that comes
-// in as a constructor argument, by its full class name ('cu-…').
+// applyInline() or style.inline(): so look only at the lines that do, directly
+// or through what feeds them (_setLineState(), a *Classes list, a
+// PanelDivider's class), not at every string in the file, where a class name
+// also turns up as a style_class or an unrelated value ('ring'). A leading
+// 'cu-' is dropped.
 test('every targeted style class is one extension.js styles', () => {
     const js = readFileSync(new URL('../src/extension.js', import.meta.url), 'utf8');
+    const styled = new Set();
+    for (const line of js.split('\n')) {
+        if (!/applyInline\(|style\.inline\(|_setLineState\(|Classes = |new PanelDivider\(/.test(line))
+            continue;
+        for (const [, name] of line.matchAll(/'([\w-]+)'/g))
+            styled.add(name.replace(/^cu-/, ''));
+    }
     const classes = new Set(UI_STYLE_PROPS.flatMap(p => p.targets.map(t => t.cls)));
     assert.ok(classes.size > 30, `${classes.size} classes`);
     for (const cls of classes)
-        assert.ok(js.includes(`'${cls}'`) || js.includes(`'cu-${cls}'`), `${cls} is never styled`);
+        assert.ok(styled.has(cls), `${cls} is never styled`);
 });
 
 // stylesheet.css holds the defaults; the table repeats them so preferences can
