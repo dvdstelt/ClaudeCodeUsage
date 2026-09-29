@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+Thanks to @shiznatix, who contributed most of this release: several usage windows side by side in the panel, the dividers, the subscription tier icon, and the "Shared UI", "Top-Bar UI" and "Popup UI" tabs (#19).
+
 ### Added
 - The panel can show several usage windows at once: "Panel reflects" is now a
   set of switches (5-hour, 7-day, per-model, most constrained, worst active
