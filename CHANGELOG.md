@@ -55,10 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Less work between polls: the panel is only laid out again when what it
   shows changes, unchanged gauges are not repainted, and the popup's
   captions are only updated while it is open.
+- The popup shortcut can be a function key (F1-F35) or a media key on its own, without a modifier. A bare letter, digit, space or Escape still needs one, so the shortcut cannot swallow ordinary typing (#13).
 
 ### Fixed
 - After a failed refresh the panel's `!` no longer reverts to the old values
   on the next countdown tick; it stays until a refresh succeeds.
+- The popup shortcut now closes the popup as well as opening it; before, a second press did nothing while the popup was open (#13).
+- An account without an active subscription now gets a message saying so, in the API's own words when it gives any, instead of a generic or misleading error such as "rate limited".
 
 ## 1.4.2 - 2026-08-28
 
