@@ -15,12 +15,20 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {UsageClient, UsageError, SignedOutError, defaultConfigDir} from './lib/usageClient.js';
 import {loadProfiles, ensureProfiles} from './lib/profiles.js';
-import {normalizeWindows, normalizeSpend} from './lib/usageModel.js';
+import {
+    normalizeWindows, normalizeSpend, selectPanelWindows, groupPanelWindows, windowTag, tierIconName,
+    migratePanelWindows,
+} from './lib/usageModel.js';
+import {uiStyle, loadOverrides, boldNumbersMarkup, hoverShade, formatColor} from './lib/uiStyle.js';
 
 const USAGE_SETTINGS_URL = 'https://claude.ai/settings/usage';
 
 // Severity levels, least to most severe.
 const LEVEL_RANK = {ok: 0, warn: 1, crit: 2};
+
+// Gauge-map key for the single '…'/'—' gauge shown while a profile has no
+// windows to display (before the first fetch, or when signed out).
+const PLACEHOLDER_GAUGE = '';
 
 // Severity from a raw utilization %: how full the bucket is right now.
 function utilLevel(util) {
@@ -41,27 +49,10 @@ function levelClass(level) {
     return `cu-${level}`;
 }
 
-// RGB triple for a level, for Cairo painting.
-function levelRgb(level) {
-    if (level === 'crit')
-        return [0.88, 0.11, 0.14]; // #e01b24
-    if (level === 'warn')
-        return [1.0, 0.47, 0.0];   // #ff7800
-    return [0.2, 0.82, 0.48];      // #33d17a
-}
-
-const RING_SIZE = 18;
-const RING_WIDTH = 3;
-const PANEL_BAR_WIDTH = 34;
-
-// StThemeNode colors are Cogl.Color. Across GNOME Shell versions the
-// components come back either as 0-255 bytes or as 0-1 floats depending on
-// the GJS build, so detect the scale instead of assuming one. Returns an
-// [r, g, b] float triple.
-function colorRgb(c) {
-    const scale = Math.max(c.red, c.green, c.blue) > 1 ? 255 : 1;
-    return [c.red / scale, c.green / scale, c.blue / scale];
-}
+// The style with nothing changed under "Top-Bar UI" and "Popup UI" in
+// preferences (lib/uiStyle.js). A widget starts from it, until its owner hands
+// it the current style through applyStyle().
+const DEFAULT_STYLE = uiStyle();
 
 // Collapse refreshes that land closer together than this. Opening the popup
 // triggers a refresh, and so does the poll timer; without a floor the two can
@@ -269,6 +260,18 @@ class Meter {
         this.root.add_child(row);
         this.root.add_child(this._track);
         this.root.add_child(this._caption);
+        this._level = 'ok';
+        this._style = DEFAULT_STYLE;
+    }
+
+    applyStyle(style) {
+        this._style = style;
+        applyInline(this.root, style, 'meter');
+        applyInline(this._name, style, 'meter-name');
+        applyInline(this._pct, style, 'meter-pct');
+        applyInline(this._track, style, 'track');
+        applyInline(this._fill, style, 'fill', this._level);
+        applyInline(this._caption, style, 'caption');
     }
 
     // The bar width tracks actual utilization; level (defaults to the util's
@@ -277,7 +280,9 @@ class Meter {
         this._pct.text = `${Math.round(util)}%`;
         this._fraction = Math.max(0, Math.min(100, util)) / 100;
         this._resizeFill();
+        this._level = level;
         this._fill.style_class = `cu-fill ${levelClass(level)}`;
+        applyInline(this._fill, this._style, 'fill', level);
         this._caption.text = caption ?? '';
         this._caption.visible = !!caption;
     }
@@ -332,23 +337,41 @@ class Ring extends St.DrawingArea {
     _init() {
         super._init({
             style_class: 'cu-ring',
-            width: RING_SIZE,
-            height: RING_SIZE,
+            x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._util = null;
-        this._color = null;
+        this._level = null;
+        this.applyStyle(DEFAULT_STYLE);
     }
 
+    // The ring paints itself, so it reads its size, line width and colors
+    // from the UI settings rather than from a stylesheet.
+    applyStyle(style) {
+        const size = style.value('ring.size');
+        this.set_size(size, size);
+        this._stroke = style.value('ring.stroke');
+        this._track = style.rgba('usage.track');
+        this._colors = {ok: style.rgba('usage.ok'), warn: style.rgba('usage.warn'), crit: style.rgba('usage.crit')};
+        this.queue_repaint();
+    }
+
+    // Both setters are called on every countdown tick with values that rarely
+    // change, so an unchanged value queues no repaint.
     setValue(util, level = utilLevel(util)) {
-        this._util = Math.max(0, Math.min(100, util));
-        this._color = levelRgb(level);
+        const clamped = Math.max(0, Math.min(100, util));
+        if (clamped === this._util && level === this._level)
+            return;
+        this._util = clamped;
+        this._level = level;
         this.queue_repaint();
     }
 
     setUnknown() {
+        if (this._util === null && this._level === null)
+            return;
         this._util = null;
-        this._color = null;
+        this._level = null;
         this.queue_repaint();
     }
 
@@ -357,22 +380,20 @@ class Ring extends St.DrawingArea {
         const [w, h] = this.get_surface_size();
         const cx = w / 2;
         const cy = h / 2;
-        const radius = Math.min(w, h) / 2 - RING_WIDTH / 2;
+        // Size and line width are both settings; a line wider than the ring
+        // leaves no radius to draw.
+        const radius = Math.max(0, Math.min(w, h) / 2 - this._stroke / 2);
         const start = -Math.PI / 2;
 
-        cr.setLineWidth(RING_WIDTH);
+        cr.setLineWidth(this._stroke);
         cr.setLineCap(Cairo.LineCap.ROUND);
 
-        // Track tint follows the panel's text color, so it stays visible on
-        // both light and dark themes.
-        const [fr, fg, fb] = colorRgb(this.get_theme_node().get_foreground_color());
-        cr.setSourceRGBA(fr, fg, fb, 0.22);
+        cr.setSourceRGBA(...this._track);
         cr.arc(cx, cy, radius, 0, 2 * Math.PI);
         cr.stroke();
 
         if (this._util !== null && this._util > 0) {
-            const [r, g, b] = this._color ?? levelRgb(utilLevel(this._util));
-            cr.setSourceRGBA(r, g, b, 1);
+            cr.setSourceRGBA(...this._colors[this._level ?? utilLevel(this._util)]);
             cr.arc(cx, cy, radius, start, start + (this._util / 100) * 2 * Math.PI);
             cr.stroke();
         }
@@ -387,21 +408,46 @@ class PanelBar {
     constructor() {
         this.root = new St.BoxLayout({
             style_class: 'cu-panel-bar',
+            x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._fill = new St.Widget({style_class: 'cu-panel-bar-fill'});
         this.root.add_child(this._fill);
+        this._util = null;
+        this._level = null;
+        this._style = DEFAULT_STYLE;
     }
 
     setValue(util, level = utilLevel(util)) {
         const clamped = Math.max(0, Math.min(100, util));
-        this._fill.set_width(Math.round((clamped / 100) * PANEL_BAR_WIDTH));
-        this._fill.style_class = `cu-panel-bar-fill ${levelClass(level)}`;
+        if (clamped === this._util && level === this._level)
+            return;
+        this._util = clamped;
+        this._level = level;
+        this._syncFill();
     }
 
     setUnknown() {
-        this._fill.set_width(0);
-        this._fill.style_class = 'cu-panel-bar-fill';
+        if (this._util === null && this._level === null)
+            return;
+        this._util = null;
+        this._level = null;
+        this._syncFill();
+    }
+
+    applyStyle(style) {
+        this._style = style;
+        applyInline(this.root, style, 'panel-bar');
+        this._syncFill();
+    }
+
+    // The fill's width (a share of the bar's, which is a UI setting), its
+    // level class, and the inline style that goes with that level.
+    _syncFill() {
+        const width = this._style.value('panel-bar.width');
+        this._fill.set_width(Math.round(((this._util ?? 0) / 100) * width));
+        this._fill.style_class = this._level ? `cu-panel-bar-fill ${levelClass(this._level)}` : 'cu-panel-bar-fill';
+        applyInline(this._fill, this._style, 'panel-bar-fill', this._level);
     }
 
     // Destroys the bar's actor tree and releases the owned references.
@@ -410,6 +456,307 @@ class PanelBar {
         this.root?.destroy();
         this._fill = null;
         this.root = null;
+    }
+}
+
+// Assigns an actor property only when it changes. The panel's values are
+// re-applied on every countdown tick and rarely differ, so this keeps an idle
+// tick from touching the actors at all.
+function setIfChanged(actor, prop, value) {
+    if (actor[prop] !== value)
+        actor[prop] = value;
+}
+
+// Gives an actor the UI settings' values of its style class (`cls`, without
+// the "cu-" prefix; an array for several) as its inline style, which beats
+// stylesheet.css. With nothing changed the style is null, so the stylesheet
+// alone applies. `state` is the actor's level class, if it carries one.
+function applyInline(actor, style, cls, state = null) {
+    setIfChanged(actor, 'style', style.inline(cls, state));
+}
+
+// A divider in the panel, from one of the two divider settings: the lead
+// divider (panel-lead-divider: after the Claude icon / tier, and between
+// profiles) or the window divider (panel-divider: between groups of gauges).
+// Blank or whitespace-only text shows nothing, so the box spacing alone makes
+// the gap; exactly "|" draws a crisp 1px line rather than the font's glyph;
+// any other text is shown as typed. Owns its actors like PanelBar.
+class PanelDivider {
+    constructor(styleClass = '') {
+        this._rootClasses = styleClass ? [styleClass.replace(/^cu-/, '')] : [];
+        this.root = new St.BoxLayout({style_class: `cu-panel-divider ${styleClass}`.trim()});
+        this._line = new St.Widget({style_class: 'cu-panel-divider-line', y_align: Clutter.ActorAlign.CENTER});
+        this._label = new St.Label({text: '', style_class: 'cu-panel-divider-text', y_align: Clutter.ActorAlign.CENTER});
+        this.root.add_child(this._line);
+        this.root.add_child(this._label);
+        this.root.visible = false;
+    }
+
+    // `wanted` is whether the caller has anything for it to divide.
+    set(text, wanted) {
+        const t = String(text ?? '').trim();
+        this._line.visible = t === '|';
+        this._label.visible = t !== '|';
+        this._label.text = t;
+        this.root.visible = !!wanted && t !== '';
+    }
+
+    applyStyle(style) {
+        applyInline(this.root, style, this._rootClasses);
+        applyInline(this._line, style, 'panel-divider-line');
+        applyInline(this._label, style, 'panel-divider-text');
+    }
+
+    destroy() {
+        this._line?.destroy();
+        this._label?.destroy();
+        this.root?.destroy();
+        this._line = null;
+        this._label = null;
+        this.root = null;
+    }
+}
+
+// One usage window's gauge in the panel: an optional short tag ("5h", "7d",
+// "Fable") so several windows can share a profile's block, then the ring or
+// bar and the percentage. The ring and the bar sit in a stack, so that the
+// percentage can be drawn on top of the one shown instead of next to it (the
+// "Usage percentage" position under "Top-Bar UI"). A ProfileView keeps one per
+// window the panel-windows setting selects, and places each in a PanelGroup
+// (which carries the divider and the reset countdown). Mirrors Meter/PanelBar:
+// owns its actors and tears them down explicitly.
+class PanelGauge {
+    constructor() {
+        this.root = new St.BoxLayout({style_class: 'cu-panel-gauge'});
+        this._tag = new St.Label({text: '', style_class: 'cu-panel-wtag', y_align: Clutter.ActorAlign.CENTER});
+        this._tag.visible = false;
+        this._stack = new St.Widget({layout_manager: new Clutter.BinLayout(), y_align: Clutter.ActorAlign.CENTER});
+        this._ring = new Ring();
+        this._bar = new PanelBar();
+        this._pct = new St.Label({
+            text: '…',
+            style_class: 'cu-panel-pct',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._stack.add_child(this._ring);
+        this._stack.add_child(this._bar.root);
+        this.root.add_child(this._tag);
+        this.root.add_child(this._stack);
+        this.root.add_child(this._pct);
+        this._util = null;
+        this._level = null;
+        this._gauge = 'ring';
+        this._over = false;
+        this._tagClasses = ['panel-wtag'];
+        this._style = DEFAULT_STYLE;
+    }
+
+    // The tag only earns its width when more than one gauge is on screen, so
+    // the caller says whether to show it. A model name ("Fable") is a tag
+    // with a class of its own on top, so it can be styled apart from the
+    // "5h" / "7d" tags.
+    setTag(text, visible, model = false) {
+        this._tag.text = text ?? '';
+        this._tag.visible = !!visible && this._tag.text !== '';
+        this._tagClasses = model ? ['panel-wtag', 'panel-wtag-model'] : ['panel-wtag'];
+        setIfChanged(this._tag, 'style_class', this._tagClasses.map(cls => `cu-${cls}`).join(' '));
+        applyInline(this._tag, this._style, this._tagClasses);
+    }
+
+    setValue(util, level) {
+        this._util = util;
+        this._syncPctText();
+        this._setLevel(level);
+        this._ring.setValue(util, level);
+        this._bar.setValue(util, level);
+    }
+
+    setUnknown() {
+        this._util = null;
+        setIfChanged(this._pct, 'text', '—');
+        this._setLevel(null);
+        this._ring.setUnknown();
+        this._bar.setUnknown();
+    }
+
+    // A failed refresh: '!' in the warning color, until the next good fetch.
+    // Re-applied on every tick while the error lasts, so it sets the text once
+    // rather than going through setUnknown's '—' first.
+    setError() {
+        this._util = null;
+        setIfChanged(this._pct, 'text', '!');
+        this._setLevel('warn');
+        this._ring.setUnknown();
+        this._bar.setUnknown();
+    }
+
+    // The percentage as text, with or without its sign (a UI setting: without,
+    // it fits inside the ring). Only while there is a value: '—', '!' and the
+    // placeholder's '…' stay as they are.
+    _syncPctText() {
+        if (this._util === null)
+            return;
+        const sign = this._style.value('panel-pct.sign') ? '%' : '';
+        setIfChanged(this._pct, 'text', `${Math.round(this._util)}${sign}`);
+    }
+
+    // The percentage's level class, and the inline style that goes with it.
+    // On top of the bar it takes none for a value: the warning and critical
+    // text colors are made to be read on the panel, not on a fill of nearly
+    // the same color, and there the fill says it. The '!' of a failed refresh
+    // (no value) keeps its warning color: the bar is empty under it.
+    _setLevel(level) {
+        this._level = level;
+        const shown = this._over && this._gauge === 'bar' && this._util !== null ? null : level;
+        setIfChanged(this._pct, 'style_class', shown ? `cu-panel-pct ${levelClass(shown)}` : 'cu-panel-pct');
+        applyInline(this._pct, this._style, 'panel-pct', shown);
+    }
+
+    // Where the percentage goes: on top of the ring or bar (the stack's last
+    // child, centred over it), or after it in the row. With no gauge to draw
+    // it on, it stays in the row. Called for every preference change, so it
+    // only moves the label when the answer differs.
+    _syncPctPlace() {
+        const over = this._gauge !== 'none' && this._style.value('panel-pct.position') === 'over';
+        if (over === this._over)
+            return;
+        this._over = over;
+        this._pct.get_parent()?.remove_child(this._pct);
+        (over ? this._stack : this.root).add_child(this._pct);
+    }
+
+    applyStyle(style) {
+        this._style = style;
+        applyInline(this.root, style, 'panel-gauge');
+        applyInline(this._tag, style, this._tagClasses);
+        this._ring.applyStyle(style);
+        this._bar.applyStyle(style);
+        this._syncPctPlace();
+        this._syncPctText();
+        this._setLevel(this._level);
+    }
+
+    applyVisibility(settings) {
+        this._gauge = settings.get_string('panel-gauge');
+        this._ring.visible = this._gauge === 'ring';
+        this._bar.root.visible = this._gauge === 'bar';
+        this._stack.visible = this._gauge !== 'none';
+        this._pct.visible = settings.get_boolean('show-percentage');
+        this._syncPctPlace();
+        this._setLevel(this._level);
+    }
+
+    destroy() {
+        this._tag?.destroy();
+        this._ring?.destroy();
+        this._bar?.destroy();
+        this._pct?.destroy();
+        this._stack?.destroy();
+        this.root?.destroy();
+        this._tag = null;
+        this._ring = null;
+        this._bar = null;
+        this._pct = null;
+        this._stack = null;
+        this.root = null;
+    }
+}
+
+// A run of panel gauges that reset together (see groupPanelWindows): the
+// window divider, the gauges, then one reset countdown for all of them. Most
+// groups hold a single gauge; the 7-day window and the per-model 7-day windows
+// share one. The gauges belong to the ProfileView (they outlive a regrouping),
+// so the group only parents them and hands them back before it is destroyed.
+class PanelGroup {
+    constructor() {
+        this.root = new St.BoxLayout({style_class: 'cu-panel-group'});
+        this._divider = new PanelDivider();
+        this._reset = new St.Label({text: '', style_class: 'cu-panel-reset', y_align: Clutter.ActorAlign.CENTER});
+        this._reset.visible = false;
+        this.root.add_child(this._divider.root);
+        this.root.add_child(this._reset);
+        this._gauges = [];
+        this._resetsAt = null;
+        this._showReset = false;
+        this._boldNumbers = false;
+        // What the countdown label was last given (see _syncResetText).
+        this._shown = null;
+    }
+
+    // Parents exactly these gauges, in order, between the divider and the
+    // countdown. A gauge is only reparented when it sits somewhere else.
+    setGauges(gauges) {
+        for (const gauge of this._gauges) {
+            if (!gauges.includes(gauge) && gauge.root?.get_parent() === this.root)
+                this.root.remove_child(gauge.root);
+        }
+        gauges.forEach((gauge, i) => {
+            const parent = gauge.root.get_parent();
+            if (parent !== this.root) {
+                parent?.remove_child(gauge.root);
+                this.root.add_child(gauge.root);
+            }
+            this.root.set_child_at_index(gauge.root, i + 1);
+        });
+        this._gauges = [...gauges];
+    }
+
+    setDivider(text, wanted) {
+        this._divider.set(text, wanted);
+    }
+
+    // The group's reset time (null: no countdown). The text is recomputed on
+    // every call, which is how the countdown ticks between polls.
+    setReset(iso) {
+        this._resetsAt = iso ?? null;
+        this._syncResetText();
+        this._syncReset();
+    }
+
+    // The countdown, with its numbers in bold and its units regular when that
+    // UI setting is on. Markup and plain text go in through different calls
+    // (setting the text also switches markup off again), so what was last
+    // given is remembered here rather than read back from the label.
+    _syncResetText() {
+        const text = this._resetsAt ? compactReset(this._resetsAt) : '';
+        const shown = `${this._boldNumbers}|${text}`;
+        if (shown === this._shown)
+            return;
+        this._shown = shown;
+        if (this._boldNumbers)
+            this._reset.clutter_text.set_markup(boldNumbersMarkup(text));
+        else
+            this._reset.text = text;
+    }
+
+    applyVisibility(settings) {
+        this._showReset = settings.get_boolean('show-reset');
+        this._syncReset();
+    }
+
+    applyStyle(style) {
+        applyInline(this.root, style, 'panel-group');
+        applyInline(this._reset, style, 'panel-reset');
+        this._divider.applyStyle(style);
+        this._boldNumbers = style.value('panel-reset.bold-numbers');
+        this._syncResetText();
+    }
+
+    // An empty countdown still takes its box spacing, so hide it.
+    _syncReset() {
+        setIfChanged(this._reset, 'visible', this._showReset && this._reset.text !== '');
+    }
+
+    destroy() {
+        this.setGauges([]);
+        this._divider?.destroy();
+        this._reset?.destroy();
+        this.root?.destroy();
+        this._divider = null;
+        this._reset = null;
+        this.root = null;
+        this._gauges = [];
     }
 }
 
@@ -435,11 +782,15 @@ class ProfileView {
         this._meters = new Map();
 
         // ---- panel block ----
+        // [profile divider] [chip] [tier icon] [tier label] [lead divider]
+        // [groups of gauges]. Both dividers here draw the lead-divider text:
+        // one between this profile and the previous one, one between this
+        // block's leading elements and its gauges.
         this._panelBlock = new St.BoxLayout({style_class: 'cu-panel-block'});
-        this._panelSep = null;
+        this._profileDivider = null;
         if (!isFirst) {
-            this._panelSep = new St.Widget({style_class: 'cu-panel-sep', y_align: Clutter.ActorAlign.CENTER});
-            panelBox.add_child(this._panelSep);
+            this._profileDivider = new PanelDivider('cu-panel-divider-profile');
+            panelBox.add_child(this._profileDivider.root);
         }
         if (showChip) {
             this._chip = new St.Label({
@@ -449,17 +800,37 @@ class ProfileView {
             });
             this._panelBlock.add_child(this._chip);
         }
-        this._ring = new Ring();
-        this._panelBar = new PanelBar();
-        this._panelPct = new St.Label({text: '…', style_class: 'cu-panel-pct', y_align: Clutter.ActorAlign.CENTER});
-        this._panelReset = new St.Label({text: '', style_class: 'cu-panel-reset', y_align: Clutter.ActorAlign.CENTER});
+        // The tier icon has no image until the tier is known, and stays
+        // without one for a tier that has no artwork (see tierIconName).
+        this._path = path;
+        this._isFirst = isFirst;
+        this._tierIcon = new St.Icon({
+            style_class: 'cu-panel-icon cu-panel-tier-icon',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._tierIcon.visible = false;
         this._panelTier = new St.Label({text: '', style_class: 'cu-panel-tier', y_align: Clutter.ActorAlign.CENTER});
-        this._panelBlock.add_child(this._ring);
-        this._panelBlock.add_child(this._panelBar.root);
-        this._panelBlock.add_child(this._panelPct);
-        this._panelBlock.add_child(this._panelReset);
+        this._panelTier.visible = false;
+        this._leadDivider = new PanelDivider();
+        // One PanelGauge per window the panel-windows setting selects, keyed
+        // by window key (like the popup meters) so gauges survive across
+        // polls, placed in PanelGroups (windows that reset together). Until
+        // the first fetch a single placeholder gauge shows '…'.
+        this._gaugesBox = new St.BoxLayout({style_class: 'cu-panel-gauges'});
+        this._gauges = new Map();
+        this._groups = [];
+        // Signature of everything the current layout was built from, so an
+        // unchanged panel is not laid out again (see renderPanel).
+        this._layoutSig = null;
+        // The UI settings' style, for the gauges, groups and meters made later; the
+        // indicator hands over the current one right after construction.
+        this._style = DEFAULT_STYLE;
+        this._panelBlock.add_child(this._tierIcon);
         this._panelBlock.add_child(this._panelTier);
+        this._panelBlock.add_child(this._leadDivider.root);
+        this._panelBlock.add_child(this._gaugesBox);
         panelBox.add_child(this._panelBlock);
+        this.renderPanel();
 
         // ---- popup section ----
         this._section = new St.BoxLayout({
@@ -469,24 +840,24 @@ class ProfileView {
 
         // Each profile carries its own logo and name, so the popup reads as a
         // list of accounts rather than one branded header over anonymous rows.
-        const header = new St.BoxLayout({style_class: 'cu-profile-header'});
+        this._header = new St.BoxLayout({style_class: 'cu-profile-header'});
         this._logo = new St.Icon({
             gicon: Gio.icon_new_for_string(`${path}/icons/octopus.png`),
             style_class: 'cu-logo',
             y_align: Clutter.ActorAlign.CENTER,
         });
-        header.add_child(this._logo);
+        this._header.add_child(this._logo);
         const who = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this._label = new St.Label({text: profile.label, style_class: 'cu-title'});
         this._subtitle = new St.Label({text: '', style_class: 'cu-subtitle'});
         who.add_child(this._label);
         who.add_child(this._subtitle);
         this._pill = new St.Label({text: '', style_class: 'cu-pill', y_align: Clutter.ActorAlign.CENTER});
-        // An empty pill still paints as a coloured dot; only show it with a tier.
+        // An empty pill still paints as a colored dot; only show it with a tier.
         this._pill.visible = false;
-        header.add_child(who);
-        header.add_child(this._pill);
-        this._section.add_child(header);
+        this._header.add_child(who);
+        this._header.add_child(this._pill);
+        this._section.add_child(this._header);
 
         // Limits — one meter per window the API reports (5-hour, 7-day, and
         // any per-model windows like Fable), built dynamically on render.
@@ -499,22 +870,101 @@ class ProfileView {
         this._error = wrapLabel(new St.Label({text: '', style_class: 'cu-error'}));
         this._error.visible = false;
         this._section.add_child(this._error);
-
+        // The state class each of the two lines carries (a spend level, "dim"
+        // for a signed-out note), which its inline style depends on.
+        this._extraState = null;
+        this._errorState = null;
 
         sectionsBox.add_child(this._section);
     }
 
     applyVisibility() {
-        const gauge = this._settings.get_string('panel-gauge');
-        this._ring.visible = gauge === 'ring';
-        this._panelBar.root.visible = gauge === 'bar';
-        this._panelPct.visible = this._settings.get_boolean('show-percentage');
-        this._panelTier.visible = this._settings.get_boolean('show-tier');
-        this._panelReset.visible = this._settings.get_boolean('show-reset');
+        const s = this._settings;
+        for (const gauge of this._gauges.values())
+            gauge.applyVisibility(s);
+        for (const group of this._groups)
+            group.applyVisibility(s);
+        // Both follow their widget: no tier yet (or signed out) means no
+        // label text, and a tier without artwork means no icon image.
+        this._panelTier.visible = s.get_boolean('show-tier') && this._panelTier.text !== '';
+        this._tierIcon.visible = s.get_boolean('show-tier-icon') && this._tierIcon.gicon !== null;
         // The chip is only built with more than one profile, and is then
         // toggleable — some people would rather not spend the panel width.
         if (this._chip)
-            this._chip.visible = this._settings.get_boolean('show-profile-chip');
+            this._chip.visible = s.get_boolean('show-profile-chip');
+
+        // The lead divider: before every profile but the first, and between
+        // this block's leading elements and its gauges when it has any. The
+        // Claude icon is shared and sits in front of the first block, so it
+        // counts as a leading element of that block only.
+        const lead = s.get_string('panel-lead-divider');
+        const leading = !!this._chip?.visible || this._tierIcon.visible || this._panelTier.visible
+            || (this._isFirst && s.get_boolean('show-icon'));
+        this._leadDivider.set(lead, leading);
+        this._profileDivider?.set(lead, true);
+    }
+
+    // Applies the UI settings to the panel block and the popup section, and
+    // keeps them for the gauges, groups and meters that are created later.
+    applyStyle(style) {
+        this._style = style;
+        applyInline(this._section, style, this._isFirst ? [] : 'profile-section-divider');
+        applyInline(this._header, style, 'profile-header');
+        applyInline(this._logo, style, 'logo');
+        applyInline(this._label, style, 'title');
+        applyInline(this._subtitle, style, 'subtitle');
+        applyInline(this._pill, style, 'pill');
+        for (const meter of this._meters.values())
+            meter.applyStyle(style);
+        this._setLineState(this._extra, 'extra', this._extraState);
+        this._setLineState(this._error, 'error', this._errorState);
+        applyInline(this._panelBlock, style, 'panel-block');
+        if (this._chip)
+            applyInline(this._chip, style, 'panel-chip');
+        applyInline(this._tierIcon, style, ['panel-icon', 'panel-tier-icon']);
+        applyInline(this._panelTier, style, 'panel-tier');
+        applyInline(this._gaugesBox, style, 'panel-gauges');
+        this._profileDivider?.applyStyle(style);
+        this._leadDivider.applyStyle(style);
+        for (const gauge of this._gauges.values())
+            gauge.applyStyle(style);
+        for (const group of this._groups)
+            group.applyStyle(style);
+    }
+
+    // The state class of the extra-usage or error line (null: none), with the
+    // inline style that goes with it.
+    _setLineState(label, cls, state) {
+        if (cls === 'extra')
+            this._extraState = state;
+        else
+            this._errorState = state;
+        label.style_class = state ? `cu-${cls} cu-${state}` : `cu-${cls}`;
+        applyInline(label, this._style, cls, state);
+    }
+
+    // Records the account's plan in the popup pill, the panel label, and the
+    // panel icon. Called on every poll, so it only acts on a change.
+    _setTier(plan, rateLimitTier) {
+        const label = tierLabel(plan, rateLimitTier);
+        if (label === this._pill.text)
+            return;
+        this._pill.text = label;
+        this._pill.visible = true;
+        this._panelTier.text = label.split(' ')[0];
+        const icon = tierIconName(label);
+        this._tierIcon.gicon = icon
+            ? Gio.icon_new_for_string(`${this._path}/icons/tier-${icon}-symbolic.svg`)
+            : null;
+        this.applyVisibility();
+    }
+
+    _clearTier() {
+        this._pill.text = '';
+        this._pill.visible = false;
+        this._panelTier.text = '';
+        this._tierIcon.gicon = null;
+        this.applyVisibility();
     }
 
     async applyTierFromDisk(cancellable) {
@@ -526,10 +976,7 @@ class ProfileView {
             // generic "CLAUDE"; the refresh fills in the real state shortly.
             if (!subscriptionType && !rateLimitTier)
                 return;
-            const label = tierLabel(subscriptionType, rateLimitTier);
-            this._pill.text = label;
-            this._pill.visible = true;
-            this._panelTier.text = label.split(' ')[0];
+            this._setTier(subscriptionType, rateLimitTier);
         } catch {
             // Not signed in yet; the refresh will surface a clearer message.
         }
@@ -571,9 +1018,7 @@ class ProfileView {
             const plan = profile.organization?.organization_type
                 ?? (profile.account.has_claude_max ? 'max'
                     : profile.account.has_claude_pro ? 'pro' : null);
-            this._pill.text = tierLabel(plan, profile.organization?.rate_limit_tier);
-            this._pill.visible = true;
-            this._panelTier.text = this._pill.text.split(' ')[0];
+            this._setTier(plan, profile.organization?.rate_limit_tier);
         }
 
         // Build the meter list from the normalised windows. The model prefers
@@ -587,6 +1032,7 @@ class ProfileView {
             let meter = this._meters.get(w.key);
             if (!meter) {
                 meter = new Meter(w.label);
+                meter.applyStyle(this._style);
                 this._metersBox.add_child(meter.root);
                 this._meters.set(w.key, meter);
             } else {
@@ -608,18 +1054,19 @@ class ProfileView {
 
         this._renderSpend(usage);
 
-        this.renderPanel();
+        // Before renderPanel: it keeps the '!' for as long as this says 'error'.
         this.lastResult = 'ok';
+        this.renderPanel();
     }
 
     // Renders the "extra usage" line from the normalised spend block (the new
-    // structured `spend` object, or the legacy `extra_usage` fallback), colour-
+    // structured `spend` object, or the legacy `extra_usage` fallback), color-
     // ing it by the API's severity.
     _renderSpend(usage) {
         const spend = normalizeSpend(usage);
         if (!spend) {
             this._extra.visible = false;
-            this._extra.style_class = 'cu-extra';
+            this._setLineState(this._extra, 'extra', null);
             return;
         }
         const parts = [spend.used, spend.limit].filter(Boolean);
@@ -627,7 +1074,7 @@ class ProfileView {
         if (spend.percent !== null)
             text += ` (${spend.percent}%)`;
         this._extra.text = text;
-        this._extra.style_class = `cu-extra ${levelClass(spend.level)}`;
+        this._setLineState(this._extra, 'extra', spend.level);
         this._extra.visible = true;
     }
 
@@ -654,12 +1101,17 @@ class ProfileView {
         return soonest;
     }
 
-    // Re-apply meters and panel from the last fetched usage (captions only move).
-    refreshCountdowns() {
+    // Re-applies the last fetched usage so the time-derived parts move between
+    // polls: the reset countdowns and the burn-rate colors. Nothing is
+    // fetched. The popup's meters only need it while the menu is open (the
+    // indicator also calls this the moment it opens).
+    refreshCountdowns(menuOpen) {
         if (!this._lastUsage)
             return;
-        for (const {meter, w} of this._meterBindings)
-            this._applyWindow(meter, w);
+        if (menuOpen) {
+            for (const {meter, w} of this._meterBindings)
+                this._applyWindow(meter, w);
+        }
         this.renderPanel();
     }
 
@@ -692,54 +1144,108 @@ class ProfileView {
         return maxLevel(windowLevel(w.utilization, w.resetsAt, w.totalSeconds), w.apiLevel);
     }
 
-    // The worst window to surface in the panel: the highest severity among the
-    // active limits (or all of them if none are marked active), breaking ties by
-    // utilization. This is how a 100% scoped window (e.g. Fable) reaches the bar
-    // even when the session and weekly totals are calm.
-    _worstWindow(windows) {
-        const active = windows.filter(w => w.isActive);
-        const pool = active.length ? active : windows;
-        const score = w => LEVEL_RANK[this._windowLevel(w)] * 1000 + (Number(w.utilization) || 0);
-        return pool.reduce((best, w) => (score(w) > score(best) ? w : best));
+    // Which normalised usage windows the panel shows, per the panel-windows
+    // preference (any mix of 5-hour / 7-day / per-model / max / worst, merged
+    // and kept in role order). The 'worst' selector ranks by the computed
+    // severity, then utilization, over the active limits — that is how a 100%
+    // scoped window (e.g. Fable) reaches the panel even when the session and
+    // weekly totals are calm.
+    _panelWindows() {
+        return selectPanelWindows(this._windows, this._settings.get_strv('panel-windows'),
+            w => LEVEL_RANK[this._windowLevel(w)] * 1000 + (Number(w.utilization) || 0));
     }
 
-    // Which normalised usage window the panel reflects, per the panel-window
-    // preference.
-    _panelWindow() {
-        const windows = this._windows;
-        if (!windows || !windows.length)
-            return null;
-        switch (this._settings.get_string('panel-window')) {
-        case 'seven-day':
-            return windows.find(w => w.role === 'weekly') ?? windows[0];
-        case 'worst':
-            return this._worstWindow(windows);
-        case 'max':
-            return windows.reduce((best, w) =>
-                (Number(w.utilization) || 0) > (Number(best.utilization) || 0) ? w : best);
-        case 'five-hour':
-        default:
-            return windows.find(w => w.role === 'session') ?? windows[0];
+    // The gauge for a window key, created (with the current visibility
+    // toggles applied) on first use. A PanelGroup parents it.
+    _gauge(key) {
+        let gauge = this._gauges.get(key);
+        if (!gauge) {
+            gauge = new PanelGauge();
+            gauge.applyVisibility(this._settings);
+            gauge.applyStyle(this._style);
+            this._gauges.set(key, gauge);
         }
+        return gauge;
     }
 
+    // Syncs the panel with the selected windows. Runs after every poll, on
+    // preference changes, and on the countdown tick (the 'worst' selector
+    // depends on the burn rate, so the selection can move between polls).
+    // The layout — which gauges exist, how they group, dividers, tags — is
+    // only redone when its signature changes, so an unchanged panel costs a
+    // string compare; the values are then re-applied, which is cheap.
     renderPanel() {
-        const sel = this._panelWindow();
-        if (!sel || !Number.isFinite(sel.utilization)) {
-            this._panelPct.text = '—';
-            this._panelPct.style_class = 'cu-panel-pct';
-            this._ring.setUnknown();
-            this._panelBar.setUnknown();
-            this._panelReset.text = '';
-            return;
+        const sel = this._panelWindows();
+        // With nothing to show (no data yet, or signed out) one group holds a
+        // single placeholder gauge.
+        const groups = sel.length ? groupPanelWindows(sel) : [{windows: [], resetsAt: null}];
+        const divider = this._settings.get_string('panel-divider');
+        // Tags only when several windows share the block.
+        const tagged = sel.length > 1;
+        const sig = JSON.stringify([divider, tagged, groups.map(g => g.windows.map(w => [w.key, windowTag(w)]))]);
+        if (sig !== this._layoutSig) {
+            this._layoutPanel(groups, divider, tagged);
+            this._layoutSig = sig;
         }
-        const util = sel.utilization;
-        const level = this._windowLevel(sel);
-        this._panelPct.text = `${Math.round(util)}%`;
-        this._panelPct.style_class = `cu-panel-pct ${levelClass(level)}`;
-        this._panelReset.text = sel.resetsAt ? compactReset(sel.resetsAt) : '';
-        this._ring.setValue(util, level);
-        this._panelBar.setValue(util, level);
+        this._updatePanel(groups);
+    }
+
+    // One PanelGroup per group and one PanelGauge per window, both reused:
+    // gauges are keyed by window and move between groups as the grouping
+    // changes, and are torn down when their window leaves the selection. The
+    // window divider goes before every group but the first.
+    _layoutPanel(groups, divider, tagged) {
+        const keysOf = g => (g.windows.length ? g.windows.map(w => w.key) : [PLACEHOLDER_GAUGE]);
+        const wanted = new Set(groups.flatMap(keysOf));
+        for (const [key, gauge] of this._gauges) {
+            if (!wanted.has(key)) {
+                gauge.destroy();
+                this._gauges.delete(key);
+            }
+        }
+        while (this._groups.length > groups.length)
+            this._groups.pop().destroy();
+        while (this._groups.length < groups.length) {
+            const group = new PanelGroup();
+            group.applyVisibility(this._settings);
+            group.applyStyle(this._style);
+            this._gaugesBox.add_child(group.root);
+            this._groups.push(group);
+        }
+        groups.forEach((g, i) => {
+            this._groups[i].setGauges(keysOf(g).map(key => this._gauge(key)));
+            this._groups[i].setDivider(divider, i > 0);
+            for (const w of g.windows)
+                this._gauges.get(w.key).setTag(windowTag(w), tagged, w.role === 'scoped');
+        });
+    }
+
+    // Values, colors and countdowns for the laid-out groups. After a failed
+    // refresh every gauge reads '!', and keeps reading it through countdown
+    // ticks and preference changes, until a fetch succeeds again.
+    _updatePanel(groups) {
+        const failed = this.lastResult === 'error';
+        groups.forEach((g, i) => {
+            this._groups[i].setReset(failed ? null : g.resetsAt);
+            if (!g.windows.length) {
+                // The placeholder keeps its '…' until the first result is in.
+                const gauge = this._gauges.get(PLACEHOLDER_GAUGE);
+                if (failed)
+                    gauge.setError();
+                else if (this.lastResult !== null)
+                    gauge.setUnknown();
+                return;
+            }
+            for (const w of g.windows) {
+                const gauge = this._gauges.get(w.key);
+                if (failed)
+                    gauge.setError();
+                else if (Number.isFinite(w.utilization))
+                    gauge.setValue(w.utilization, this._windowLevel(w));
+                else
+                    gauge.setUnknown();
+            }
+        });
     }
 
     _renderError(e) {
@@ -758,11 +1264,8 @@ class ProfileView {
             logError(e, `claude-usage: rate limited for "${this.profile.label}", keeping last data`);
             return;
         }
-        this._panelPct.text = '!';
-        this._panelPct.style_class = 'cu-panel-pct cu-warn';
-        this._ring.setUnknown();
-        this._panelBar.setUnknown();
-        this._panelReset.text = '';
+        this.lastResult = 'error';
+        this.renderPanel();
         let msg;
         if (e instanceof UsageError && e.status === 401)
             msg = 'Session expired. Sign in via Claude Code or Settings.';
@@ -777,9 +1280,8 @@ class ProfileView {
         else
             msg = e.message || 'Could not reach Claude';
         this._error.text = msg;
-        this._error.style_class = 'cu-error';
+        this._setLineState(this._error, 'error', null);
         this._error.visible = true;
-        this.lastResult = 'error';
         logError(e, `claude-usage: refresh failed for "${this.profile.label}"`);
     }
 
@@ -794,22 +1296,17 @@ class ProfileView {
         this._lastUsage = null;
 
         this._subtitle.text = 'Signed out';
-        this._pill.text = '';
-        this._pill.visible = false;
-        this._panelTier.text = '';
+        this._clearTier();
         this._extra.visible = false;
 
-        this._panelPct.text = '—';
-        this._panelPct.style_class = 'cu-panel-pct';
-        this._ring.setUnknown();
-        this._panelBar.setUnknown();
-        this._panelReset.text = '';
-
-        this._error.text = e.message;
-        this._error.style_class = 'cu-error cu-dim';
-        this._error.visible = true;
         // Not a failure: the subtitle and note already say "signed out".
         this.lastResult = 'signed-out';
+        // Windows are cleared above, so this collapses to the placeholder.
+        this.renderPanel();
+
+        this._error.text = e.message;
+        this._setLineState(this._error, 'error', 'dim');
+        this._error.visible = true;
     }
 
     // Destroys every widget this view owns, leaf-first, then releases the
@@ -823,13 +1320,18 @@ class ProfileView {
         this._meters.clear();
 
         // Panel block contents, then the block itself.
-        this._ring?.destroy();
-        this._panelBar?.destroy();
+        for (const gauge of this._gauges.values())
+            gauge.destroy();
+        this._gauges.clear();
+        for (const group of this._groups)
+            group.destroy();
+        this._groups = [];
+        this._gaugesBox?.destroy();
         this._chip?.destroy();
-        this._panelPct?.destroy();
-        this._panelReset?.destroy();
+        this._tierIcon?.destroy();
         this._panelTier?.destroy();
-        this._panelSep?.destroy();
+        this._leadDivider?.destroy();
+        this._profileDivider?.destroy();
         this._panelBlock?.destroy();
 
         // Popup section contents, then the section itself.
@@ -837,21 +1339,22 @@ class ProfileView {
         this._label?.destroy();
         this._subtitle?.destroy();
         this._pill?.destroy();
+        this._header?.destroy();
         this._metersBox?.destroy();
         this._section?.destroy();
 
-        this._ring = null;
-        this._panelBar = null;
+        this._gaugesBox = null;
         this._chip = null;
-        this._panelPct = null;
-        this._panelReset = null;
+        this._tierIcon = null;
         this._panelTier = null;
-        this._panelSep = null;
+        this._leadDivider = null;
+        this._profileDivider = null;
         this._panelBlock = null;
         this._logo = null;
         this._label = null;
         this._subtitle = null;
         this._pill = null;
+        this._header = null;
         this._metersBox = null;
         this._section = null;
         this._meterBindings = [];
@@ -869,6 +1372,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._path = path;
         this._settings = settings;
         this._openPreferences = openPreferences;
+        // Carry a pre-1.5 single "panel reflects" choice into panel-windows.
+        migratePanelWindows(settings);
         this._busy = false;
         this._cancellable = new Gio.Cancellable();
         this._lastFetchMs = 0;
@@ -893,8 +1398,13 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         // disconnectObject(this) in destroy() (and the automatic cleanup when
         // this actor is destroyed) tears them all down.
         this.menu.connectObject('open-state-changed', (_m, open) => {
-            if (open)
-                this._refresh();
+            if (!open)
+                return;
+            // The popup's captions are not ticked while it is closed, and the
+            // refresh below may be throttled, so bring them up to date first.
+            for (const view of this._profileViews)
+                view.refreshCountdowns(true);
+            this._refresh();
         }, this);
 
         // Live-apply preference changes without needing a shell reload.
@@ -903,9 +1413,13 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             'changed::panel-gauge', () => this._applyVisibility(),
             'changed::show-percentage', () => this._applyVisibility(),
             'changed::show-tier', () => this._applyVisibility(),
+            'changed::show-tier-icon', () => this._applyVisibility(),
+            'changed::panel-lead-divider', () => this._applyVisibility(),
             'changed::show-reset', () => this._applyVisibility(),
             'changed::show-profile-chip', () => this._applyVisibility(),
-            'changed::panel-window', () => this._renderAllPanels(),
+            'changed::panel-windows', () => this._renderAllPanels(),
+            'changed::panel-divider', () => this._renderAllPanels(),
+            'changed::ui-style', () => this._applyStyle(),
             'changed::poll-seconds', () => this._startTimer(),
             // Signing in (or out) from prefs changes the token source; refetch.
             'changed::access-token', () => this._refresh(true),
@@ -914,6 +1428,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             this);
 
         this._applyVisibility();
+        this._applyStyle();
         this._initProfiles();
     }
 
@@ -945,6 +1460,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
                 this._sectionsBox, showChip, i === 0, allowSharedToken, this._path);
         });
         this._applyVisibility();
+        this._applyStyle();
         for (const view of this._profileViews)
             view.applyTierFromDisk(this._cancellable);
         this._refresh(true);
@@ -963,7 +1479,8 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
     _buildMenuShell() {
         const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
-        const root = new St.BoxLayout({vertical: true, style_class: 'cu-popup'});
+        this._popupRoot = new St.BoxLayout({vertical: true, style_class: 'cu-popup'});
+        const root = this._popupRoot;
         item.add_child(root);
         this.menu.addMenuItem(item);
 
@@ -974,33 +1491,38 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         root.add_child(this._sectionsBox);
 
         // actions
-        const actions = new St.BoxLayout({style_class: 'cu-actions'});
-        const openUsage = new St.Button({label: 'Usage page', style_class: 'cu-btn cu-btn-pri', x_expand: true});
-        openUsage.connect('clicked', () => {
-            this.menu.close();
-            Gio.AppInfo.launch_default_for_uri(USAGE_SETTINGS_URL, null);
-        });
-        actions.add_child(openUsage);
-        root.add_child(actions);
+        this._actions = new St.BoxLayout({style_class: 'cu-actions'});
+        this._usageBtn = new St.Button({label: 'Usage page', style_class: 'cu-btn', x_expand: true});
+        this._usageBtn.connectObject(
+            'clicked', () => {
+                this.menu.close();
+                Gio.AppInfo.launch_default_for_uri(USAGE_SETTINGS_URL, null);
+            },
+            // Its hover shade may be set inline (see _styleUsageButton).
+            'notify::hover', () => this._styleUsageButton(),
+            this);
+        this._actions.add_child(this._usageBtn);
+        root.add_child(this._actions);
 
         // footer
-        const footer = new St.BoxLayout({style_class: 'cu-footer'});
+        this._footer = new St.BoxLayout({style_class: 'cu-footer'});
+        const footer = this._footer;
         // One timestamp for the whole popup: every profile refreshes in the
         // same cycle, so a per-profile time would just repeat itself.
         this._updated = new St.Label({text: 'Loading…', style_class: 'cu-updated', x_expand: true});
         footer.add_child(this._updated);
-        const settingsBtn = new St.Button({label: '⚙ Settings', style_class: 'cu-refresh', x_expand: true});
-        settingsBtn.connect('clicked', () => {
+        this._settingsBtn = new St.Button({label: '⚙ Settings', style_class: 'cu-refresh', x_expand: true});
+        this._settingsBtn.connectObject('clicked', () => {
             this.menu.close();
             this._openPreferences?.();
-        });
+        }, this);
         const refreshLabel = this._profileViews?.length > 1 ? '↻ Refresh all' : '↻ Refresh';
         this._refreshBtn = new St.Button({label: refreshLabel, style_class: 'cu-refresh', x_expand: true});
         // connectObject so destroy() can drop this with disconnectObject(this);
         // a bare connect() on a this._* field is flagged by the store's review
         // tooling as a signal that is never disconnected.
         this._refreshBtn.connectObject('clicked', () => this._refresh(true), this);
-        footer.add_child(settingsBtn);
+        footer.add_child(this._settingsBtn);
         footer.add_child(this._refreshBtn);
         root.add_child(footer);
     }
@@ -1041,6 +1563,36 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             view.applyVisibility();
         if (this._refreshBtn)
             this._refreshBtn.label = this._profileViews.length > 1 ? '↻ Refresh all' : '↻ Refresh';
+    }
+
+    // Applies the UI settings (the ui-style key: the style values changed from
+    // their defaults) to the shared actors of the panel and the popup, and to
+    // every profile.
+    _applyStyle() {
+        const style = uiStyle(loadOverrides(this._settings));
+        this._uiStyle = style;
+        applyInline(this._panelBox, style, 'panel');
+        applyInline(this._panelIcon, style, 'panel-icon');
+        applyInline(this._popupRoot, style, 'popup');
+        applyInline(this._actions, style, 'actions');
+        applyInline(this._footer, style, 'footer');
+        applyInline(this._updated, style, 'updated');
+        applyInline(this._settingsBtn, style, 'refresh');
+        applyInline(this._refreshBtn, style, 'refresh');
+        this._styleUsageButton();
+        for (const view of this._profileViews)
+            view.applyStyle(style);
+    }
+
+    // The button's inline style. An inline background beats the stylesheet's
+    // :hover rule, so while a changed background is in place the shade under
+    // the pointer is worked out from it and set here too.
+    _styleUsageButton() {
+        const style = this._uiStyle;
+        let css = style.inline('btn');
+        if (this._usageBtn.hover && style.overridden('btn.background-color'))
+            css += ` background-color: ${formatColor(hoverShade(style.rgba('btn.background-color')))};`;
+        setIfChanged(this._usageBtn, 'style', css);
     }
 
     _renderAllPanels() {
@@ -1084,6 +1636,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
     // Tick the "resets in …" captions between polls: every second once a reset
     // is under 90s away (so the seconds display is live), every 30s otherwise.
+    // Nothing is fetched here; the views re-apply their last data.
     _scheduleCountdown() {
         if (this._countdownTimer) {
             GLib.source_remove(this._countdownTimer);
@@ -1096,7 +1649,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._countdownTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
             this._countdownTimer = null;
             for (const view of this._profileViews)
-                view.refreshCountdowns();
+                view.refreshCountdowns(this.menu.isOpen);
             this._scheduleCountdown();
             return GLib.SOURCE_REMOVE;
         });
@@ -1124,6 +1677,12 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._refreshBtn?.disconnectObject(this);
         this._refreshBtn?.destroy();
         this._refreshBtn = null;
+        this._settingsBtn?.disconnectObject(this);
+        this._settingsBtn?.destroy();
+        this._settingsBtn = null;
+        this._usageBtn?.disconnectObject(this);
+        this._usageBtn?.destroy();
+        this._usageBtn = null;
         this._panelIcon?.destroy();
         this._panelIcon = null;
 
@@ -1134,6 +1693,13 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         this._panelBox = null;
         this._sectionsBox?.destroy();
         this._sectionsBox = null;
+        this._actions?.destroy();
+        this._actions = null;
+        this._footer?.destroy();
+        this._footer = null;
+        this._popupRoot?.destroy();
+        this._popupRoot = null;
+        this._uiStyle = null;
 
         super.destroy();
     }
