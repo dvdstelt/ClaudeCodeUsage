@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+Thanks to @zeroSteiner for the extra-usage bar that pooled and enterprise accounts now get (#18).
+
 ### Fixed
 - The extension failed to load on GNOME Shell 51 ("No property vertical on
   StBoxLayout"), which removed the old `vertical` property. It now uses
