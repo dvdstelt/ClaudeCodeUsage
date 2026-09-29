@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- Pooled/usage-based accounts (e.g. enterprise seats) that don't get a 5-hour/7-day rate-limit breakdown from the API now show their extra-usage percentage as a bar, in both the panel gauge and the dropdown, instead of an empty ring and a bare "-".
+
 ## 1.5.0 - 2026-09-29
 
 Thanks to @shiznatix, who contributed most of this release: several usage windows side by side in the panel, the dividers, the subscription tier icon, and the "Shared UI", "Top-Bar UI" and "Popup UI" tabs (#19).
