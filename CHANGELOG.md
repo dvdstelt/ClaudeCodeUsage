@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 1.5.1 - 2026-10-01
+
 Thanks to @zeroSteiner for the extra-usage bar that pooled and enterprise accounts now get (#18).
 
 ### Fixed
