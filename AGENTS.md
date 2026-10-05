@@ -90,6 +90,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   for the pasted code, and Disconnect.
 - `src/schemas/` — GSettings schema (`org.gnome.shell.extensions.claude-usage`).
   Keys: `show-icon`/`show-percentage`/`show-tier` (label)/`show-tier-icon`/`show-reset` (bool),
+  `show-remaining` (bool, show 100% minus usage in the panel and popup; default off),
   `panel-gauge` (`ring`|`bar`|`none`),
   `panel-windows` (`as`, any of `five-hour`|`seven-day`|`scoped`|`max`|`worst`;
   one panel gauge per matched window, merged and shown in role order),

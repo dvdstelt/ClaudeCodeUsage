@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- A "Show usage left" panel option: the panel and the popup show how much of
+  each window is left instead of how much is used, and the gauges fill with
+  what is left. Their colors still follow the usage. Off by default.
+
 ## 1.5.0 - 2026-09-29
 
 Thanks to @shiznatix, who contributed most of this release: several usage windows side by side in the panel, the dividers, the subscription tier icon, and the "Shared UI", "Top-Bar UI" and "Popup UI" tabs (#19).
