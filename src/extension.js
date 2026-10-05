@@ -276,8 +276,8 @@ class Meter {
 
     // The bar width tracks actual utilization; level (defaults to the util's
     // own level) drives the color, so projection can tint without resizing.
-    setValue(util, caption, level = utilLevel(util)) {
-        this._pct.text = `${Math.round(util)}%`;
+    setValue(util, caption, level = utilLevel(util), suffix = '') {
+        this._pct.text = `${Math.round(util)}%${suffix}`;
         this._fraction = Math.max(0, Math.min(100, util)) / 100;
         this._resizeFill();
         this._level = level;
@@ -1135,7 +1135,10 @@ class ProfileView {
         if (note)
             caption = caption ? `${caption} · ${note}` : note;
 
-        meter.setValue(util, caption, level);
+        if (this._settings.get_boolean('show-remaining'))
+            meter.setValue(100 - util, caption, level, ' left');
+        else
+            meter.setValue(util, caption, level);
     }
 
     // Final level for a normalised window: the computed burn consequence,
@@ -1225,6 +1228,7 @@ class ProfileView {
     // ticks and preference changes, until a fetch succeeds again.
     _updatePanel(groups) {
         const failed = this.lastResult === 'error';
+        const remaining = this._settings.get_boolean('show-remaining');
         groups.forEach((g, i) => {
             this._groups[i].setReset(failed ? null : g.resetsAt);
             if (!g.windows.length) {
@@ -1241,7 +1245,7 @@ class ProfileView {
                 if (failed)
                     gauge.setError();
                 else if (Number.isFinite(w.utilization))
-                    gauge.setValue(w.utilization, this._windowLevel(w));
+                    gauge.setValue(remaining ? 100 - w.utilization : w.utilization, this._windowLevel(w));
                 else
                     gauge.setUnknown();
             }
@@ -1419,6 +1423,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             'changed::show-profile-chip', () => this._applyVisibility(),
             'changed::panel-windows', () => this._renderAllPanels(),
             'changed::panel-divider', () => this._renderAllPanels(),
+            'changed::show-remaining', () => this._renderAllPanels(),
             'changed::ui-style', () => this._applyStyle(),
             'changed::poll-seconds', () => this._startTimer(),
             // Signing in (or out) from prefs changes the token source; refetch.
