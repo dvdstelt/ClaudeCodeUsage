@@ -30,7 +30,7 @@ See [install](#install) instructions
 
 ## Requirements
 
-- GNOME Shell 46, 47, 48, 49, or 50 (Ubuntu 24.04 LTS and newer).
+- GNOME Shell 46, 47, 48, 49, 50, or 51 (Ubuntu 24.04 LTS and newer).
 - A **Claude Pro or Max subscription**. The extension reports the usage limits
   that come with a Claude Code subscription, so a free account has nothing to
   show and cannot be connected - authorization is refused before any token is

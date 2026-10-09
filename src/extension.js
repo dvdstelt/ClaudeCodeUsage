@@ -235,7 +235,7 @@ function wrapLabel(label) {
 // A labelled progress meter: title + percentage row, bar, and reset caption.
 class Meter {
     constructor(name) {
-        this.root = new St.BoxLayout({vertical: true, style_class: 'cu-meter'});
+        this.root = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: 'cu-meter'});
 
         const row = new St.BoxLayout({style_class: 'cu-meter-row'});
         this._name = new St.Label({text: name, style_class: 'cu-meter-name', x_expand: true});
@@ -834,7 +834,7 @@ class ProfileView {
 
         // ---- popup section ----
         this._section = new St.BoxLayout({
-            vertical: true,
+            orientation: Clutter.Orientation.VERTICAL,
             style_class: isFirst ? 'cu-profile-section' : 'cu-profile-section cu-profile-section-divider',
         });
 
@@ -847,7 +847,7 @@ class ProfileView {
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._header.add_child(this._logo);
-        const who = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        const who = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this._label = new St.Label({text: profile.label, style_class: 'cu-title'});
         this._subtitle = new St.Label({text: '', style_class: 'cu-subtitle'});
         who.add_child(this._label);
@@ -861,7 +861,7 @@ class ProfileView {
 
         // Limits — one meter per window the API reports (5-hour, 7-day, and
         // any per-model windows like Fable), built dynamically on render.
-        this._metersBox = new St.BoxLayout({vertical: true});
+        this._metersBox = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL});
         this._section.add_child(this._metersBox);
 
         this._extra = wrapLabel(new St.Label({text: '', style_class: 'cu-extra'}));
@@ -1479,7 +1479,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
     _buildMenuShell() {
         const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
-        this._popupRoot = new St.BoxLayout({vertical: true, style_class: 'cu-popup'});
+        this._popupRoot = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: 'cu-popup'});
         const root = this._popupRoot;
         item.add_child(root);
         this.menu.addMenuItem(item);
@@ -1487,7 +1487,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         // No global header: each profile section carries its own logo and name,
         // so a single-profile popup looks the way it always did.
         // One section per profile, rebuilt whenever the profile list changes.
-        this._sectionsBox = new St.BoxLayout({vertical: true});
+        this._sectionsBox = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL});
         root.add_child(this._sectionsBox);
 
         // actions
