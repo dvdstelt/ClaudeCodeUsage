@@ -9,6 +9,7 @@ import Shell from 'gi://Shell';
 import Cairo from 'cairo';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {PACKAGE_VERSION} from 'resource:///org/gnome/shell/misc/config.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
@@ -29,6 +30,12 @@ const LEVEL_RANK = {ok: 0, warn: 1, crit: 2};
 // Gauge-map key for the single '…'/'—' gauge shown while a profile has no
 // windows to display (before the first fetch, or when signed out).
 const PLACEHOLDER_GAUGE = '';
+
+// Props that make an St.BoxLayout vertical. Shell 51 dropped `vertical` for
+// `orientation`.
+const VERTICAL_BOX = parseInt(PACKAGE_VERSION) >= 51
+    ? {orientation: Clutter.Orientation.VERTICAL}
+    : {vertical: true};
 
 // Severity from a raw utilization %: how full the bucket is right now.
 function utilLevel(util) {
@@ -235,7 +242,7 @@ function wrapLabel(label) {
 // A labelled progress meter: title + percentage row, bar, and reset caption.
 class Meter {
     constructor(name) {
-        this.root = new St.BoxLayout({vertical: true, style_class: 'cu-meter'});
+        this.root = new St.BoxLayout({...VERTICAL_BOX, style_class: 'cu-meter'});
 
         const row = new St.BoxLayout({style_class: 'cu-meter-row'});
         this._name = new St.Label({text: name, style_class: 'cu-meter-name', x_expand: true});
@@ -834,7 +841,7 @@ class ProfileView {
 
         // ---- popup section ----
         this._section = new St.BoxLayout({
-            vertical: true,
+            ...VERTICAL_BOX,
             style_class: isFirst ? 'cu-profile-section' : 'cu-profile-section cu-profile-section-divider',
         });
 
@@ -847,7 +854,7 @@ class ProfileView {
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._header.add_child(this._logo);
-        const who = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        const who = new St.BoxLayout({...VERTICAL_BOX, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this._label = new St.Label({text: profile.label, style_class: 'cu-title'});
         this._subtitle = new St.Label({text: '', style_class: 'cu-subtitle'});
         who.add_child(this._label);
@@ -861,7 +868,7 @@ class ProfileView {
 
         // Limits — one meter per window the API reports (5-hour, 7-day, and
         // any per-model windows like Fable), built dynamically on render.
-        this._metersBox = new St.BoxLayout({vertical: true});
+        this._metersBox = new St.BoxLayout(VERTICAL_BOX);
         this._section.add_child(this._metersBox);
 
         this._extra = wrapLabel(new St.Label({text: '', style_class: 'cu-extra'}));
@@ -1479,7 +1486,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
 
     _buildMenuShell() {
         const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
-        this._popupRoot = new St.BoxLayout({vertical: true, style_class: 'cu-popup'});
+        this._popupRoot = new St.BoxLayout({...VERTICAL_BOX, style_class: 'cu-popup'});
         const root = this._popupRoot;
         item.add_child(root);
         this.menu.addMenuItem(item);
@@ -1487,7 +1494,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         // No global header: each profile section carries its own logo and name,
         // so a single-profile popup looks the way it always did.
         // One section per profile, rebuilt whenever the profile list changes.
-        this._sectionsBox = new St.BoxLayout({vertical: true});
+        this._sectionsBox = new St.BoxLayout(VERTICAL_BOX);
         root.add_child(this._sectionsBox);
 
         // actions
