@@ -117,6 +117,7 @@ Built by [@dvdstelt](https://github.com/dvdstelt), with thanks to everyone who h
 
 - [@amalakhovsky](https://github.com/amalakhovsky) - rendering every usage window dynamically from the API's `limits[]` array (per-model windows such as Fable, the "worst active limit" panel option, structured spend), and fixing the popup bars to fill completely at 100%.
 - [@ClemDNL](https://github.com/ClemDNL) - the optional time-until-reset countdown in the panel.
+- [@francisco-polaco](https://github.com/francisco-polaco) - support for GNOME Shell 51.
 - [@rafi0x](https://github.com/rafi0x) - multiple profiles
 - [@shiznatix](https://github.com/shiznatix) - several usage windows side by side in the panel, the dividers and the subscription tier icon, and the "Shared UI", "Top-Bar UI" and "Popup UI" tabs that make every size, color and font in the panel and the popup configurable.
 - [@zeroSteiner](https://github.com/zeroSteiner) - a usage bar for pooled and enterprise accounts that get no rate-limit windows, fed by their extra-usage spend.
