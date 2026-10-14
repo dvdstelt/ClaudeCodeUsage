@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 1.5.1 - 2026-10-14
+
+Thanks to @zeroSteiner for the extra-usage bar that pooled and enterprise accounts now get (#18), and to @francisco-polaco for the GNOME Shell 51 fix (#28).
+
 ### Fixed
 - The extension failed to load on GNOME Shell 51 ("No property vertical on
   StBoxLayout"), which removed the old `vertical` property. It now uses
   `orientation` on shell 51 and later, `vertical` on the older ones, and
   `metadata.json` lists shell 51.
+- Pooled/usage-based accounts (e.g. enterprise seats) that don't get a 5-hour/7-day rate-limit breakdown from the API now show their extra-usage percentage as a bar, in both the panel gauge and the dropdown, instead of an empty ring and a bare "-".
 
 ## 1.5.0 - 2026-09-29
 
