@@ -367,3 +367,11 @@ export function windowTag(w) {
         return String(w?.label ?? '');
     }
 }
+
+// The percentage to show for a share used (a window's utilization or the
+// extra-usage percent): unchanged, or with "Show usage left" on, the share
+// left. That one is rounded first, so the two modes always add up to 100, and
+// never goes below 0 for a window over its limit.
+export function shownPercent(util, remaining) {
+    return remaining ? Math.max(0, 100 - Math.round(util)) : util;
+}
