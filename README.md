@@ -24,6 +24,7 @@ See [install](#install) instructions
 - **Multiple profiles.** If you run more than one Claude Code account on this machine (via `CLAUDE_CONFIG_DIR`, e.g. `~/.claude` and `~/.claude-work`), the extension shows every configured profile side by side in the panel and the dropdown, and refreshes them all together. Profiles are auto-detected on first run; add, rename, repoint, or remove them from the "Claude profiles" group in preferences.
 - **Dropdown** with per-window meters: the 5-hour window, the 7-day window, and any per-model 7-day windows the API reports (for example Opus and Sonnet), discovered automatically.
 - **Rate projection.** Meters, the ring, and the panel percentage are colored by your projected end-of-window usage at the current burn rate, so a fast burn turns amber or red before you actually hit the limit. When a window is on track to run out early, the caption spells it out (for example `burning fast — out in ~1h20m at this rate`); a window that is merely rising shows `on track for ~N% by reset`.
+- **Pace marker.** Each meter in the dropdown has a thin line at the usage that an even rate of use gives by now. One day into the 7-day window, the line is at 1/7 (about 14%). A fill past the line is ahead of pace: at that rate, the window runs out before it resets.
 - **Live countdown.** The "resets in" captions tick down between polls, counting in seconds once a window is less than a minute from resetting.
 - **Themeable.** The gauge track is a neutral grey that reads on both light and dark themes, and every color, size, spacing and font in the panel and the popup can be changed from the UI preference tabs.
 - **Configurable** refresh interval and choice of which windows the panel shows: any mix of the 5-hour window, the 7-day window, per-model windows such as Fable, whichever is most constrained, or the worst active limit, side by side.
@@ -99,6 +100,8 @@ Within a tab the same holds: one line width and spacing covers every separator l
 - **Model tag** - the model name (for example `Fable`) before a per-model gauge can have its own font size, weight and color. Each one follows the window tag (`5h`, `7d`) until you change it.
 - **Time until reset** - *Bold numbers* shows `1h19m` with the `1` and the `19` in bold and the `h` and the `m` regular.
 - **Dividers** - the *lead divider* sits between the leading elements (Claude icon, profile tag, subscription tier) and the gauges, and between profiles; the *window divider* sits between usage windows. For either one, a single `|` draws a thin vertical line (the lead divider's default), any other text (for example `·`) is shown as typed, and blank shows nothing. One color applies to both kinds; a line also has a width and a height, and text a font size.
+
+On the Popup UI tab, **Pace marker** has the switch for the pace marker (on by default), its color (by default the popup's text color, so it reads on light and dark themes), its line width, and how far it reaches above and below the bar.
 
 ## Authentication
 

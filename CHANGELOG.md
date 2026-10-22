@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+Thanks to @Power-tile for the idea of the pace marker (#26).
+
 ### Added
 - A "Show usage left" option: the panel and the popup show how much of each
   usage window and of the extra usage is left instead of how much is used,
   and the gauges fill with what is left. Their colors still follow the usage,
   and near the limit the gauge's empty part turns amber or red too, so the
   warning stays visible when little is left. Off by default (#25).
+- A pace marker on the meters in the dropdown: a thin line at the usage that an even rate of use gives by now. For example, one day into the 7-day window the line is at 1/7 (about 14%). A fill past the line is ahead of pace. The marker is on by default. The new "Pace marker" group on the "Popup UI" tab has a switch for it, its color (by default the popup's text color), its line width, and how far it reaches above and below the bar. A meter with no reset time and the extra-usage meter have no line.
 
 ## 1.5.1 - 2026-10-14
 

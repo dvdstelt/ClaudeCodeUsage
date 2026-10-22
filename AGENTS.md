@@ -66,7 +66,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
     its inline style via `applyInline()`, which is null (stylesheet.css alone
     applies) when nothing it uses was changed. A widget made later (a gauge
     or group from `_layoutPanel`) gets the `ProfileView`'s kept style. The
-    ring paints itself and the bar sizes its own fill, so those read
+    ring and the popup's pace marker paint themselves and the bar sizes its own fill, so those read
     `style.value()` / `style.rgba()` instead; there are no size or color
     constants left in extension.js (the ring's colors and track are the
     shared `usage.*` values). With `show-remaining` on, a gauge or meter at
@@ -83,6 +83,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
     gets the inline style of both. `PanelGroup._syncResetText()` writes the
     countdown as Pango markup (`boldNumbersMarkup`) while the
     `panel-reset.bold-numbers` value is on, as plain text otherwise.
+  - Pace marker: each `Meter` stacks a `PaceMarker` (an `St.DrawingArea`) over its track in a `Clutter.BinLayout`, so the line can reach above and below the bar, which a child of the track cannot. It paints a line at `pacePercent()` (usageModel.js) in its theme node's foreground color, which is the popup's text color until `pace.color` is set, and is `track.height` + 2 × `pace.reach` tall. With `pace.show` off it is hidden, so the meter is as tall as before. With it on, a meter with no pace (extra usage, or no reset time) keeps that height and paints no line, so all meters stay the same height. Popup meters only: the panel's ring and bar get no marker.
 - `src/prefs.js` — Adwaita preferences (element toggles, the "Panel reflects"
   window switches, refresh interval, the "Claude profiles" list), bound to
   GSettings, on the "General" tab, plus one tab per entry of `UI_PAGES`
@@ -149,7 +150,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   `color`, `choice`, `bool`), its default, and its targets (style class,
   optional state class, `ok`/`warn`/`crit` or `dim`, and CSS properties;
   none for a value the extension paints or acts on itself: the ring's, the
-  `bold-numbers` switch, the percentage's `position` and `sign`). One value can have several targets, and that is
+  pace marker's switch, width and reach, the `bold-numbers` switch, the percentage's `position` and `sign`). One value can have several targets, and that is
   the rule rather than the exception: values meant to be the same thing are
   one setting (the shared "Usage colors" for the ring, the bar gauge, the
   popup meters and their text; one spacing for the panel's boxes; one
@@ -168,8 +169,8 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   groups come first in the table. The model tag follows the window tag the
   same way, within one tab. An unchanged follower writes nothing, so the
   value it follows must have the same state targets (a test checks it). A
-  `def: null` without `inherits` means "the panel's own" and is for the
-  percentage's color and font size only. A group may also list `settings`, plain string
+  `def: null` without `inherits` means "the panel's own" (or, on the popup tab, "the popup's own") and is for the
+  percentage's color and font size and the pace marker's color only. A group may also list `settings`, plain string
   GSettings keys (`panel-lead-divider`, `panel-divider`) that the page
   edits, resets and counts too (`textSettingChanged`). "Reset all" is per
   tab: `changedCount(settings, page)` and `resetPage(settings, page)`.
@@ -204,7 +205,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   the extra-usage money block (`normalizeSpend`), and the panel's window
   selection (`selectPanelWindows` over the `panel-windows` selectors,
   `windowTag` for the short panel tags, `migratePanelWindows` for the
-  `panel-window` upgrade). No GI or shell imports, so it is unit-testable
+  `panel-window` upgrade), and where the popup's pace marker goes (`pacePercent`, the share of a window that has passed). No GI or shell imports, so it is unit-testable
   under plain `node` (see `tools/test-usageModel.mjs`).
 - `src/stylesheet.css` — `cu-*` classes for the indicator and popup, and the
   defaults of every UI setting. Values shared between classes are declared
