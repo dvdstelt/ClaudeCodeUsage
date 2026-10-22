@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- A "Show usage left" option: the panel and the popup show how much of each
+  usage window and of the extra usage is left instead of how much is used,
+  and the gauges fill with what is left. Their colors still follow the usage,
+  and near the limit the gauge's empty part turns amber or red too, so the
+  warning stays visible when little is left. Off by default (#25).
+
 ## 1.5.1 - 2026-10-14
 
 Thanks to @zeroSteiner for the extra-usage bar that pooled and enterprise accounts now get (#18), and to @francisco-polaco for the GNOME Shell 51 fix (#28).

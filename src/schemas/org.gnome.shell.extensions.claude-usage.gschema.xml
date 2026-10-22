@@ -22,6 +22,11 @@
       <summary>Show the usage percentage</summary>
       <description>Display the usage percentage number in the panel.</description>
     </key>
+    <key name="show-remaining" type="b">
+      <default>false</default>
+      <summary>Show usage left instead of used</summary>
+      <description>Show how much of each usage window and of the extra usage is left (100% minus the used share) instead of how much is used, in the panel and in the popup. The gauges fill with what is left, and their colors still follow the usage.</description>
+    </key>
     <key name="show-tier" type="b">
       <default>true</default>
       <summary>Show the subscription tier label</summary>

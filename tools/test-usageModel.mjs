@@ -6,7 +6,7 @@ import {existsSync} from 'node:fs';
 import {
     normalizeWindows, normalizeSpend, apiSeverityLevel, limitLabel, limitKey,
     selectPanelWindows, windowTag, migratePanelWindows, groupPanelWindows, tierIconName,
-    PANEL_SELECTORS, TIER_ICONS,
+    shownPercent, PANEL_SELECTORS, TIER_ICONS,
 } from '../src/lib/usageModel.js';
 
 let passed = 0;
@@ -296,6 +296,18 @@ test('migratePanelWindows: seeds the list from the old single choice exactly onc
     s = fake({'panel-window': 'nope'});
     migratePanelWindows(s);
     assert.deepEqual(s.writes, []);
+});
+
+test('shownPercent: the share used as is, or the share left, rounded and never below 0', () => {
+    assert.equal(shownPercent(72.5, false), 72.5);
+    assert.equal(shownPercent(104, false), 104);
+    assert.equal(shownPercent(0, true), 100);
+    assert.equal(shownPercent(100, true), 0);
+    // Rounded before the subtraction, so it agrees with the used view's 73%.
+    assert.equal(shownPercent(72.5, true), 27);
+    assert.equal(shownPercent(27.4, true), 73);
+    // A window over its limit reads 0% left, not -4%.
+    assert.equal(shownPercent(104, true), 0);
 });
 
 console.log(`\n${passed} tests passed`);

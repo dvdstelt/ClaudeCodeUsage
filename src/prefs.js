@@ -112,6 +112,13 @@ export default class ClaudeUsagePreferences extends ExtensionPreferences {
             settings.bind(key, row, 'active', Gio.SettingsBindFlags.DEFAULT);
         }
 
+        const remainingRow = new Adw.SwitchRow({
+            title: 'Show usage left',
+            subtitle: 'Show how much of each usage window and of the extra usage is left instead of how much is used, in the panel and the popup.',
+        });
+        elements.add(remainingRow);
+        settings.bind('show-remaining', remainingRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+
         // Only has any effect with more than one profile configured.
         const chipRow = new Adw.SwitchRow({
             title: 'Profile tag',

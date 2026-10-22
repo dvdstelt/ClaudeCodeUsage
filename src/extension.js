@@ -18,7 +18,7 @@ import {UsageClient, UsageError, SignedOutError, defaultConfigDir} from './lib/u
 import {loadProfiles, ensureProfiles} from './lib/profiles.js';
 import {
     normalizeWindows, normalizeSpend, selectPanelWindows, groupPanelWindows, windowTag, tierIconName,
-    migratePanelWindows,
+    migratePanelWindows, shownPercent,
 } from './lib/usageModel.js';
 import {uiStyle, loadOverrides, boldNumbersMarkup, hoverShade, formatColor} from './lib/uiStyle.js';
 
@@ -56,6 +56,27 @@ function maxLevel(a, b) {
 // Style-class suffix for a level (cu-ok / cu-warn / cu-crit).
 function levelClass(level) {
     return `cu-${level}`;
+}
+
+// With "Show usage left" on, a gauge fills with the share left, so a window
+// near its limit has next to no fill to carry the warning color. Its track
+// takes the level's color instead, at the track's own opacity (at most half,
+// so the fill still stands out), whenever the level is warn or crit. null
+// when the track keeps its own color.
+function trackTint(style, level, left) {
+    if (!left || (level !== 'warn' && level !== 'crit'))
+        return null;
+    const [r, g, b] = style.rgba(`usage.${level}`);
+    return [r, g, b, Math.min(style.rgba('usage.track')[3], 0.5)];
+}
+
+// An actor's inline style with its track color replaced by a tint (see
+// trackTint), or the plain inline style when there is none.
+function applyTrackInline(actor, style, cls, tint) {
+    let css = style.inline(cls);
+    if (tint)
+        css = `${css ?? ''} background-color: ${formatColor(tint)};`.trim();
+    setIfChanged(actor, 'style', css);
 }
 
 // The style with nothing changed under "Top-Bar UI" and "Popup UI" in
@@ -159,8 +180,9 @@ function windowLevel(util, resetsAtIso, totalSeconds) {
 }
 
 // Caption note explaining the projection, tied to the same lockout threshold as
-// windowLevel so an amber gauge never reads "burning fast".
-function projectionNote(util, resetsAtIso, totalSeconds) {
+// windowLevel so an amber gauge never reads "burning fast". With "Show usage
+// left" on (remaining), the projected number is the share left too.
+function projectionNote(util, resetsAtIso, totalSeconds, remaining = false) {
     const lockout = lockoutSeconds(util, resetsAtIso, totalSeconds);
     if (lockout !== null) {
         if (lockout >= totalSeconds * LOCKOUT_CRIT_FRAC) {
@@ -170,8 +192,11 @@ function projectionNote(util, resetsAtIso, totalSeconds) {
         return 'on pace to run out just before reset';
     }
     const proj = projectedUtil(util, resetsAtIso, totalSeconds);
-    if (proj >= 75 && Math.round(proj) > Math.round(util))
-        return `on track for ~${Math.round(proj)}% by reset`;
+    if (proj >= 75 && Math.round(proj) > Math.round(util)) {
+        return remaining
+            ? `on track for ~${shownPercent(proj, true)}% left by reset`
+            : `on track for ~${Math.round(proj)}% by reset`;
+    }
     return '';
 }
 
@@ -270,6 +295,7 @@ class Meter {
         this.root.add_child(this._track);
         this.root.add_child(this._caption);
         this._level = 'ok';
+        this._left = false;
         this._style = DEFAULT_STYLE;
     }
 
@@ -278,20 +304,25 @@ class Meter {
         applyInline(this.root, style, 'meter');
         applyInline(this._name, style, 'meter-name');
         applyInline(this._pct, style, 'meter-pct');
-        applyInline(this._track, style, 'track');
+        applyTrackInline(this._track, style, 'track', trackTint(style, this._level, this._left));
         applyInline(this._fill, style, 'fill', this._level);
         applyInline(this._caption, style, 'caption');
     }
 
-    // The bar width tracks actual utilization; level (defaults to the util's
-    // own level) drives the color, so projection can tint without resizing.
-    setValue(util, caption, level = utilLevel(util)) {
-        this._pct.text = `${Math.round(util)}%`;
-        this._fraction = Math.max(0, Math.min(100, util)) / 100;
+    // pct is the percentage shown, and the bar fills to it: the share used,
+    // or with left set, the share left (then shown as "73% left"). level
+    // drives the color and must always come from the share used, so
+    // projection can tint without resizing; with left set, a warn or crit
+    // level also tints the track (see trackTint).
+    setValue(pct, caption, level, left = false) {
+        this._pct.text = `${Math.round(pct)}%${left ? ' left' : ''}`;
+        this._fraction = Math.max(0, Math.min(100, pct)) / 100;
         this._resizeFill();
         this._level = level;
+        this._left = left;
         this._fill.style_class = `cu-fill ${levelClass(level)}`;
         applyInline(this._fill, this._style, 'fill', level);
+        applyTrackInline(this._track, this._style, 'track', trackTint(this._style, level, left));
         this._caption.text = caption ?? '';
         this._caption.visible = !!caption;
     }
@@ -316,6 +347,8 @@ class Meter {
         this._fraction = 0;
         this._fill.set_width(0);
         this._caption.visible = false;
+        this._left = false;
+        applyTrackInline(this._track, this._style, 'track', null);
     }
 
     // Destroys the meter's actor tree and releases the owned references.
@@ -351,6 +384,7 @@ class Ring extends St.DrawingArea {
         });
         this._util = null;
         this._level = null;
+        this._left = false;
         this.applyStyle(DEFAULT_STYLE);
     }
 
@@ -360,19 +394,23 @@ class Ring extends St.DrawingArea {
         const size = style.value('ring.size');
         this.set_size(size, size);
         this._stroke = style.value('ring.stroke');
+        this._uiStyle = style;
         this._track = style.rgba('usage.track');
         this._colors = {ok: style.rgba('usage.ok'), warn: style.rgba('usage.warn'), crit: style.rgba('usage.crit')};
         this.queue_repaint();
     }
 
     // Both setters are called on every countdown tick with values that rarely
-    // change, so an unchanged value queues no repaint.
-    setValue(util, level = utilLevel(util)) {
-        const clamped = Math.max(0, Math.min(100, util));
-        if (clamped === this._util && level === this._level)
+    // change, so an unchanged value queues no repaint. pct is the share the
+    // ring fills to (used, or with left set, left); level always comes from
+    // the share used.
+    setValue(pct, level, left = false) {
+        const clamped = Math.max(0, Math.min(100, pct));
+        if (clamped === this._util && level === this._level && left === this._left)
             return;
         this._util = clamped;
         this._level = level;
+        this._left = left;
         this.queue_repaint();
     }
 
@@ -381,6 +419,7 @@ class Ring extends St.DrawingArea {
             return;
         this._util = null;
         this._level = null;
+        this._left = false;
         this.queue_repaint();
     }
 
@@ -397,7 +436,7 @@ class Ring extends St.DrawingArea {
         cr.setLineWidth(this._stroke);
         cr.setLineCap(Cairo.LineCap.ROUND);
 
-        cr.setSourceRGBA(...this._track);
+        cr.setSourceRGBA(...(trackTint(this._uiStyle, this._level, this._left) ?? this._track));
         cr.arc(cx, cy, radius, 0, 2 * Math.PI);
         cr.stroke();
 
@@ -424,15 +463,18 @@ class PanelBar {
         this.root.add_child(this._fill);
         this._util = null;
         this._level = null;
+        this._left = false;
         this._style = DEFAULT_STYLE;
     }
 
-    setValue(util, level = utilLevel(util)) {
-        const clamped = Math.max(0, Math.min(100, util));
-        if (clamped === this._util && level === this._level)
+    // Same arguments as Ring.setValue.
+    setValue(pct, level, left = false) {
+        const clamped = Math.max(0, Math.min(100, pct));
+        if (clamped === this._util && level === this._level && left === this._left)
             return;
         this._util = clamped;
         this._level = level;
+        this._left = left;
         this._syncFill();
     }
 
@@ -441,22 +483,24 @@ class PanelBar {
             return;
         this._util = null;
         this._level = null;
+        this._left = false;
         this._syncFill();
     }
 
     applyStyle(style) {
         this._style = style;
-        applyInline(this.root, style, 'panel-bar');
         this._syncFill();
     }
 
     // The fill's width (a share of the bar's, which is a UI setting), its
-    // level class, and the inline style that goes with that level.
+    // level class, and the inline style that goes with that level, then the
+    // track's (the bar itself) inline style, tinted or not.
     _syncFill() {
         const width = this._style.value('panel-bar.width');
         this._fill.set_width(Math.round(((this._util ?? 0) / 100) * width));
         this._fill.style_class = this._level ? `cu-panel-bar-fill ${levelClass(this._level)}` : 'cu-panel-bar-fill';
         applyInline(this._fill, this._style, 'panel-bar-fill', this._level);
+        applyTrackInline(this.root, this._style, 'panel-bar', trackTint(this._style, this._level, this._left));
     }
 
     // Destroys the bar's actor tree and releases the owned references.
@@ -573,12 +617,14 @@ class PanelGauge {
         applyInline(this._tag, this._style, this._tagClasses);
     }
 
-    setValue(util, level) {
-        this._util = util;
+    // pct is the percentage shown and filled to: the share used, or with left
+    // set, the share left. level always comes from the share used.
+    setValue(pct, level, left = false) {
+        this._util = pct;
         this._syncPctText();
         this._setLevel(level);
-        this._ring.setValue(util, level);
-        this._bar.setValue(util, level);
+        this._ring.setValue(pct, level, left);
+        this._bar.setValue(pct, level, left);
     }
 
     setUnknown() {
@@ -1091,7 +1137,8 @@ class ProfileView {
                 this._spendMeter.applyStyle(this._style);
                 this._section.insert_child_below(this._spendMeter.root, this._error);
             }
-            this._spendMeter.setValue(spend.percent, parts.join(' / '), spend.level);
+            const left = this._settings.get_boolean('show-remaining');
+            this._spendMeter.setValue(shownPercent(spend.percent, left), parts.join(' / '), spend.level, left);
             this._extra.visible = false;
             return;
         }
@@ -1140,13 +1187,15 @@ class ProfileView {
     // Re-applies the last fetched usage so the time-derived parts move between
     // polls: the reset countdowns and the burn-rate colors. Nothing is
     // fetched. The popup's meters only need it while the menu is open (the
-    // indicator also calls this the moment it opens).
+    // indicator also calls this the moment it opens, and when "Show usage
+    // left" changes, which the extra-usage meter follows too).
     refreshCountdowns(menuOpen) {
         if (!this._lastUsage)
             return;
         if (menuOpen) {
             for (const {meter, w} of this._meterBindings)
                 this._applyWindow(meter, w);
+            this._renderSpend(this._lastUsage);
         }
         this.renderPanel();
     }
@@ -1167,11 +1216,12 @@ class ProfileView {
         let caption = w.resetsAt ? relativeReset(w.resetsAt)
             : (util > 0 ? '' : 'not used yet');
 
-        const note = projectionNote(util, w.resetsAt, w.totalSeconds);
+        const left = this._settings.get_boolean('show-remaining');
+        const note = projectionNote(util, w.resetsAt, w.totalSeconds, left);
         if (note)
             caption = caption ? `${caption} · ${note}` : note;
 
-        meter.setValue(util, caption, level);
+        meter.setValue(shownPercent(util, left), caption, level, left);
     }
 
     // Final level for a normalised window: the computed burn consequence,
@@ -1261,6 +1311,7 @@ class ProfileView {
     // ticks and preference changes, until a fetch succeeds again.
     _updatePanel(groups) {
         const failed = this.lastResult === 'error';
+        const left = this._settings.get_boolean('show-remaining');
         groups.forEach((g, i) => {
             this._groups[i].setReset(failed ? null : g.resetsAt);
             if (!g.windows.length) {
@@ -1273,7 +1324,7 @@ class ProfileView {
                 if (failed)
                     gauge.setError();
                 else if (spend && Number.isFinite(spend.percent))
-                    gauge.setValue(spend.percent, spend.level);
+                    gauge.setValue(shownPercent(spend.percent, left), spend.level, left);
                 else if (this.lastResult !== null)
                     gauge.setUnknown();
                 return;
@@ -1283,7 +1334,7 @@ class ProfileView {
                 if (failed)
                     gauge.setError();
                 else if (Number.isFinite(w.utilization))
-                    gauge.setValue(w.utilization, this._windowLevel(w));
+                    gauge.setValue(shownPercent(w.utilization, left), this._windowLevel(w), left);
                 else
                     gauge.setUnknown();
             }
@@ -1466,6 +1517,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             'changed::show-profile-chip', () => this._applyVisibility(),
             'changed::panel-windows', () => this._renderAllPanels(),
             'changed::panel-divider', () => this._renderAllPanels(),
+            'changed::show-remaining', () => this._refreshCountdowns(),
             'changed::ui-style', () => this._applyStyle(),
             'changed::poll-seconds', () => this._startTimer(),
             // Signing in (or out) from prefs changes the token source; refetch.
@@ -1647,6 +1699,12 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
             view.renderPanel();
     }
 
+    // Every profile's panel, and its popup meters while the popup is open.
+    _refreshCountdowns() {
+        for (const view of this._profileViews)
+            view.refreshCountdowns(this.menu.isOpen);
+    }
+
     // force bypasses the min-gap throttle (used for explicit user actions like
     // signing in or editing profiles); opening the popup and the poll timer go
     // through the throttle. All profiles are fetched concurrently, which is
@@ -1695,8 +1753,7 @@ class ClaudeUsageIndicator extends PanelMenu.Button {
         const interval = soonest < 90 ? 1 : 30;
         this._countdownTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
             this._countdownTimer = null;
-            for (const view of this._profileViews)
-                view.refreshCountdowns(this.menu.isOpen);
+            this._refreshCountdowns();
             this._scheduleCountdown();
             return GLib.SOURCE_REMOVE;
         });

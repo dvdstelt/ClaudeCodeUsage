@@ -88,16 +88,16 @@ test('ids are unique and every prop is well-formed', () => {
 });
 
 // A value only does something if the extension hands its class to
-// applyInline() or style.inline(): so look only at the lines that do, directly
-// or through what feeds them (_setLineState(), a *Classes list, a
-// PanelDivider's class), not at every string in the file, where a class name
-// also turns up as a style_class or an unrelated value ('ring'). A leading
-// 'cu-' is dropped.
+// applyInline(), applyTrackInline() or style.inline(): so look only at the
+// lines that do, directly or through what feeds them (_setLineState(), a
+// *Classes list, a PanelDivider's class), not at every string in the file,
+// where a class name also turns up as a style_class or an unrelated value
+// ('ring'). A leading 'cu-' is dropped.
 test('every targeted style class is one extension.js styles', () => {
     const js = readFileSync(new URL('../src/extension.js', import.meta.url), 'utf8');
     const styled = new Set();
     for (const line of js.split('\n')) {
-        if (!/applyInline\(|style\.inline\(|_setLineState\(|Classes = |new PanelDivider\(/.test(line))
+        if (!/apply(Track)?Inline\(|style\.inline\(|_setLineState\(|Classes = |new PanelDivider\(/.test(line))
             continue;
         for (const [, name] of line.matchAll(/'([\w-]+)'/g))
             styled.add(name.replace(/^cu-/, ''));

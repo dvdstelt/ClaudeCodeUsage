@@ -69,9 +69,12 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
     ring paints itself and the bar sizes its own fill, so those read
     `style.value()` / `style.rgba()` instead; there are no size or color
     constants left in extension.js (the ring's colors and track are the
-    shared `usage.*` values). The popup is covered the same way: `Meter`,
-    the popup half of `ProfileView.applyStyle()` (`_setLineState()` keeps the
-    extra-usage / error line's state class and inline style together), and
+    shared `usage.*` values). With `show-remaining` on, a gauge or meter at
+    warn/crit also tints its track in the level color (`trackTint()`), since
+    its fill, the share left, is then nearly empty. The popup is covered the
+    same way: `Meter`, the popup half of `ProfileView.applyStyle()`
+    (`_setLineState()` keeps the extra-usage / error line's state class and
+    inline style together), and
     the popup shell in `ClaudeUsageIndicator._applyStyle()`. An inline
     background beats the stylesheet's `:hover`, so while the button's
     background is changed `_styleUsageButton()` sets a derived hover shade
@@ -90,6 +93,9 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   for the pasted code, and Disconnect.
 - `src/schemas/` — GSettings schema (`org.gnome.shell.extensions.claude-usage`).
   Keys: `show-icon`/`show-percentage`/`show-tier` (label)/`show-tier-icon`/`show-reset` (bool),
+  `show-remaining` (bool, show 100% minus usage, for the windows and the
+  extra usage, in the panel and popup, via `shownPercent()` in usageModel.js;
+  default off),
   `panel-gauge` (`ring`|`bar`|`none`),
   `panel-windows` (`as`, any of `five-hour`|`seven-day`|`scoped`|`max`|`worst`;
   one panel gauge per matched window, merged and shown in role order),
