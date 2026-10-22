@@ -331,6 +331,21 @@ export const UI_STYLE_GROUPS = [
         ],
     },
     {
+        title: 'Pace marker',
+        page: POPUP,
+        description: 'A line on each meter at the usage that an even rate of use gives by now, so a fill past ' +
+            'the line is ahead of pace. A meter with no reset time, and extra usage, have no line.',
+        props: [
+            bool('pace.show', 'Show the pace marker', true),
+            color('pace.color', 'Color', null, target('pace-marker', 'color'),
+                {subtitle: 'Default: the popup\'s text color.'}),
+            // No target: the marker paints its line itself, and sizes itself
+            // from the bar height, like the ring.
+            px('pace.width', 'Line width', 2, [], {min: 1, max: 8}),
+            px('pace.reach', 'Reach above and below the bar', 3, [], {max: 16}),
+        ],
+    },
+    {
         title: 'Text',
         page: POPUP,
         props: [
@@ -542,7 +557,8 @@ export function hoverShade([r, g, b, a = 1]) {
 // The resolved style for a set of overrides.
 //   value(id)  the effective value (the override, else the default; one whose
 //              default is the panel's own, the percentage's color and font
-//              size, is null until it is overridden)
+//              size, or the popup's own, the pace marker's color, is null
+//              until it is overridden)
 //   rgba(id)   the same for a color, as [r, g, b, a] floats, or null
 //   inline(cls, state)
 //              the inline style for an actor of style class cu-<cls> (or of

@@ -18,7 +18,7 @@ import {UsageClient, UsageError, SignedOutError, defaultConfigDir} from './lib/u
 import {loadProfiles, ensureProfiles} from './lib/profiles.js';
 import {
     normalizeWindows, normalizeSpend, selectPanelWindows, groupPanelWindows, windowTag, tierIconName,
-    migratePanelWindows, shownPercent,
+    migratePanelWindows, shownPercent, pacePercent,
 } from './lib/usageModel.js';
 import {uiStyle, loadOverrides, boldNumbersMarkup, hoverShade, formatColor} from './lib/uiStyle.js';
 
@@ -266,7 +266,58 @@ function wrapLabel(label) {
     return label;
 }
 
-// A labelled progress meter: title + percentage row, bar, and reset caption.
+// The pace marker of a popup meter: a short line across the bar at the usage
+// that an even rate of use gives by now (pacePercent), reaching a little above
+// and below the bar. It spans the whole bar and paints its line itself, so the
+// line needs no position of its own. It paints in its foreground color, which
+// is the popup's text color until the "Pace marker" color is changed.
+const PaceMarker = GObject.registerClass(
+class PaceMarker extends St.DrawingArea {
+    _init() {
+        // x_expand: a BinLayout child only fills the stack's width with it.
+        super._init({style_class: 'cu-pace-marker', x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        this._pace = null;
+        this.applyStyle(DEFAULT_STYLE);
+    }
+
+    // With the switch off it is hidden, so the meter is as tall as without a
+    // marker. With it on, a meter with no pace (extra usage) still has the
+    // marker's height and paints no line, so all meters stay the same height.
+    applyStyle(style) {
+        this.visible = style.value('pace.show');
+        this._width = style.value('pace.width');
+        this.set_height(style.value('track.height') + 2 * style.value('pace.reach'));
+        applyInline(this, style, 'pace-marker');
+        this.queue_repaint();
+    }
+
+    // The share of the window that has passed, in percent, or null for no line.
+    setPace(pace) {
+        const clamped = pace === null ? null : Math.max(0, Math.min(100, pace));
+        if (clamped === this._pace)
+            return;
+        this._pace = clamped;
+        this.queue_repaint();
+    }
+
+    vfunc_repaint() {
+        const cr = this.get_context();
+        const [w, h] = this.get_surface_size();
+        if (this._pace !== null && w > 0) {
+            // On whole pixels, and all of the line on the bar at 0% and 100%.
+            const x = Math.round(Math.max(0, Math.min(w - this._width, (this._pace / 100) * w - this._width / 2)));
+            // Cogl.Color (Clutter.Color on shell 46) has 0-255 channels.
+            const {red, green, blue, alpha} = this.get_theme_node().get_foreground_color();
+            cr.setSourceRGBA(red / 255, green / 255, blue / 255, alpha / 255);
+            cr.rectangle(x, 0, this._width, h);
+            cr.fill();
+        }
+        cr.$dispose();
+    }
+});
+
+// A labelled progress meter: title + percentage row, bar with its pace marker,
+// and reset caption.
 class Meter {
     constructor(name) {
         this.root = new St.BoxLayout({...VERTICAL_BOX, style_class: 'cu-meter'});
@@ -277,9 +328,16 @@ class Meter {
         row.add_child(this._name);
         row.add_child(this._pct);
 
-        this._track = new St.BoxLayout({style_class: 'cu-track', x_expand: true});
+        this._track = new St.BoxLayout({style_class: 'cu-track', x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this._fill = new St.Widget({style_class: 'cu-fill cu-ok'});
         this._track.add_child(this._fill);
+        // The pace marker reaches above and below the track, so it sits over
+        // the track in a stack rather than inside it, where the track's
+        // height would cut it off.
+        this._pace = new PaceMarker();
+        this._bar = new St.Widget({layout_manager: new Clutter.BinLayout(), x_expand: true});
+        this._bar.add_child(this._track);
+        this._bar.add_child(this._pace);
         // The fill is sized as a fraction of the track's *actual* allocated
         // width, recomputed whenever the track is (re)laid out. Sizing off a
         // fixed pixel constant left a 100% bar short of the end whenever the
@@ -292,7 +350,7 @@ class Meter {
         this._caption = wrapLabel(new St.Label({text: '', style_class: 'cu-caption'}));
 
         this.root.add_child(row);
-        this.root.add_child(this._track);
+        this.root.add_child(this._bar);
         this.root.add_child(this._caption);
         this._level = 'ok';
         this._left = false;
@@ -306,6 +364,7 @@ class Meter {
         applyInline(this._pct, style, 'meter-pct');
         applyTrackInline(this._track, style, 'track', trackTint(style, this._level, this._left));
         applyInline(this._fill, style, 'fill', this._level);
+        this._pace.applyStyle(style);
         applyInline(this._caption, style, 'caption');
     }
 
@@ -313,8 +372,9 @@ class Meter {
     // or with left set, the share left (then shown as "73% left"). level
     // drives the color and must always come from the share used, so
     // projection can tint without resizing; with left set, a warn or crit
-    // level also tints the track (see trackTint).
-    setValue(pct, caption, level, left = false) {
+    // level also tints the track (see trackTint). pace places the pace
+    // marker, and null (extra usage) shows none.
+    setValue(pct, caption, level, left = false, pace = null) {
         this._pct.text = `${Math.round(pct)}%${left ? ' left' : ''}`;
         this._fraction = Math.max(0, Math.min(100, pct)) / 100;
         this._resizeFill();
@@ -323,6 +383,7 @@ class Meter {
         this._fill.style_class = `cu-fill ${levelClass(level)}`;
         applyInline(this._fill, this._style, 'fill', level);
         applyTrackInline(this._track, this._style, 'track', trackTint(this._style, level, left));
+        this._pace.setPace(pace);
         this._caption.text = caption ?? '';
         this._caption.visible = !!caption;
     }
@@ -346,6 +407,7 @@ class Meter {
         this._pct.text = '—';
         this._fraction = 0;
         this._fill.set_width(0);
+        this._pace.setPace(null);
         this._caption.visible = false;
         this._left = false;
         applyTrackInline(this._track, this._style, 'track', null);
@@ -362,13 +424,17 @@ class Meter {
         this._pct?.destroy();
         this._fill?.destroy();
         this._caption?.destroy();
+        this._pace?.destroy();
         this._track?.destroy();
+        this._bar?.destroy();
         this.root?.destroy();
         this._name = null;
         this._pct = null;
         this._fill = null;
         this._caption = null;
+        this._pace = null;
         this._track = null;
+        this._bar = null;
         this.root = null;
     }
 }
@@ -1221,7 +1287,7 @@ class ProfileView {
         if (note)
             caption = caption ? `${caption} · ${note}` : note;
 
-        meter.setValue(shownPercent(util, left), caption, level, left);
+        meter.setValue(shownPercent(util, left), caption, level, left, pacePercent(w.resetsAt, w.totalSeconds));
     }
 
     // Final level for a normalised window: the computed burn consequence,

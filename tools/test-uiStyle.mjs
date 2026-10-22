@@ -442,6 +442,23 @@ test('the percentage: next to the gauge or on it, its sign, a font size of its o
     assert.deepEqual(cleanOverrides({'panel-pct.font-size': 11, 'panel-pct.sign': true}), {'panel-pct.font-size': 11});
 });
 
+test('the pace marker: on, in the popup\'s text color, and a line the extension paints', () => {
+    const style = uiStyle();
+    assert.equal(propGroup('pace.show').page, 'popup');
+    assert.equal(style.value('pace.show'), true);
+    assert.equal(style.value('pace.color'), null);   // the popup's text color
+    assert.equal(style.rgba('pace.color'), null);
+    assert.equal(style.value('pace.width'), 2);
+    assert.equal(style.value('pace.reach'), 3);
+    assert.equal(style.inline('pace-marker'), null);
+    const over = uiStyle({'pace.show': false, 'pace.color': '#ff00ff'});
+    assert.equal(over.value('pace.show'), false);
+    assert.equal(over.inline('pace-marker'), 'color: #ff00ff;');
+    // The line's width and reach are painted, so they write no style.
+    assert.equal(uiStyle({'pace.width': 4, 'pace.reach': 0}).inline('pace-marker'), null);
+    assert.deepEqual(cleanOverrides({'pace.show': true, 'pace.width': 2, 'pace.reach': 99, 'pace.color': 'blue'}), {});
+});
+
 test('the model tag follows the window tag until it has a value of its own', () => {
     const size = prop('panel-wtag-model.font-size');
     assert.equal(defaultValue(size), 8);
