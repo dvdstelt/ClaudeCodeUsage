@@ -6,7 +6,7 @@ import {existsSync} from 'node:fs';
 import {
     normalizeWindows, normalizeSpend, apiSeverityLevel, limitLabel, limitKey,
     selectPanelWindows, windowTag, migratePanelWindows, groupPanelWindows, tierIconName,
-    shownPercent, pacePercent, PANEL_SELECTORS, TIER_ICONS,
+    shownPercent, pacePercent, shownPace, PANEL_SELECTORS, TIER_ICONS,
 } from '../src/lib/usageModel.js';
 
 let passed = 0;
@@ -353,6 +353,21 @@ test('shownPercent: the share used as is, or the share left, rounded and never b
     assert.equal(shownPercent(27.4, true), 73);
     // A window over its limit reads 0% left, not -4%.
     assert.equal(shownPercent(104, true), 0);
+});
+
+test('shownPace: the line is where the fill would be, with usage left shown too', () => {
+    assert.equal(shownPace(25, false), 25);
+    // One day into the 7-day window, an even rate leaves 6/7.
+    assert.ok(Math.abs(shownPace(100 / 7, true) - 600 / 7) < 1e-9);
+    assert.equal(shownPace(0, true), 100);
+    assert.equal(shownPace(100, true), 0);
+    // No marker stays no marker.
+    assert.equal(shownPace(null, false), null);
+    assert.equal(shownPace(null, true), null);
+    // Ahead of pace: past the line when the bar shows the share used, short
+    // of it when the bar shows the share left.
+    assert.ok(shownPercent(60, false) > shownPace(40, false));
+    assert.ok(shownPercent(60, true) < shownPace(40, true));
 });
 
 console.log(`\n${passed} tests passed`);

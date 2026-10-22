@@ -333,8 +333,9 @@ export const UI_STYLE_GROUPS = [
     {
         title: 'Pace marker',
         page: POPUP,
-        description: 'A line on each meter at the usage that an even rate of use gives by now, so a fill past ' +
-            'the line is ahead of pace. A meter with no reset time, and extra usage, have no line.',
+        description: 'A line on each meter where the fill would be at an even rate of use. A fill past the line ' +
+            'is ahead of pace (with "Show usage left" on, a fill short of it). A meter with no reset time, and ' +
+            'extra usage, have no line.',
         props: [
             bool('pace.show', 'Show the pace marker', true),
             color('pace.color', 'Color', null, target('pace-marker', 'color'),

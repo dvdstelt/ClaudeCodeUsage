@@ -83,7 +83,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
     gets the inline style of both. `PanelGroup._syncResetText()` writes the
     countdown as Pango markup (`boldNumbersMarkup`) while the
     `panel-reset.bold-numbers` value is on, as plain text otherwise.
-  - Pace marker: each `Meter` stacks a `PaceMarker` (an `St.DrawingArea`) over its track in a `Clutter.BinLayout`, so the line can reach above and below the bar, which a child of the track cannot. It paints a line at `pacePercent()` (usageModel.js) in its theme node's foreground color, which is the popup's text color until `pace.color` is set, and is `track.height` + 2 × `pace.reach` tall. With `pace.show` off it is hidden, so the meter is as tall as before. With it on, a meter with no pace (extra usage, or no reset time) keeps that height and paints no line, so all meters stay the same height. Popup meters only: the panel's ring and bar get no marker.
+  - Pace marker: each `Meter` stacks a `PaceMarker` (an `St.DrawingArea`) over its track in a `Clutter.BinLayout`, so the line can reach above and below the bar, which a child of the track cannot. It paints a line at `pacePercent()` (usageModel.js), or with `show-remaining` on at `shownPace()` (100 minus it, like `shownPercent()` for the fill), in its theme node's foreground color, which is the popup's text color until `pace.color` is set, and is `track.height` + 2 × `pace.reach` tall. With `pace.show` off it is hidden, so the meter is as tall as before. With it on, a meter with no pace (extra usage, or no reset time) keeps that height and paints no line, so all meters stay the same height. Popup meters only: the panel's ring and bar get no marker.
 - `src/prefs.js` — Adwaita preferences (element toggles, the "Panel reflects"
   window switches, refresh interval, the "Claude profiles" list), bound to
   GSettings, on the "General" tab, plus one tab per entry of `UI_PAGES`
@@ -205,7 +205,7 @@ the LICENSE, `build.sh`, `tools/`) is repo tooling that stays out of the bundle.
   the extra-usage money block (`normalizeSpend`), and the panel's window
   selection (`selectPanelWindows` over the `panel-windows` selectors,
   `windowTag` for the short panel tags, `migratePanelWindows` for the
-  `panel-window` upgrade), and where the popup's pace marker goes (`pacePercent`, the share of a window that has passed). No GI or shell imports, so it is unit-testable
+  `panel-window` upgrade), and where the popup's pace marker goes (`pacePercent`, the share of a window that has passed, and `shownPace` for the bar as shown). No GI or shell imports, so it is unit-testable
   under plain `node` (see `tools/test-usageModel.mjs`).
 - `src/stylesheet.css` — `cu-*` classes for the indicator and popup, and the
   defaults of every UI setting. Values shared between classes are declared

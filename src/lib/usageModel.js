@@ -340,8 +340,8 @@ export function groupPanelWindows(windows) {
 
 // The utilization (0-100) that an even rate of use would have reached by now,
 // which is the share of the window that has passed: one day into a 7-day
-// window, 1/7. The popup draws its pace marker there, so a fill past the
-// marker is ahead of pace. null when the window has no reset time (a per-model
+// window, 1/7. The popup draws its pace marker there (at shownPace), so a fill
+// past the marker is ahead of pace. null when the window has no reset time (a per-model
 // window nobody has used yet) or no known length, and once the reset has
 // passed, since the usage is stale until the next poll. A reset more than one
 // window away (a clock that runs behind) counts as the start of the window.
@@ -394,4 +394,13 @@ export function windowTag(w) {
 // never goes below 0 for a window over its limit.
 export function shownPercent(util, remaining) {
     return remaining ? Math.max(0, 100 - Math.round(util)) : util;
+}
+
+// Where the pace marker goes on a bar that fills to shownPercent: the pace
+// (pacePercent) as is, or with "Show usage left" on, the share an even rate of
+// use leaves by now. So the line is always where the fill would be, and a fill
+// ahead of pace is past the line in one mode and short of it in the other.
+// Not rounded, so the line moves smoothly. null (no marker) stays null.
+export function shownPace(pace, remaining) {
+    return pace === null || !remaining ? pace : 100 - pace;
 }

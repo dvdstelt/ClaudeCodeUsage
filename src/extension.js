@@ -18,7 +18,7 @@ import {UsageClient, UsageError, SignedOutError, defaultConfigDir} from './lib/u
 import {loadProfiles, ensureProfiles} from './lib/profiles.js';
 import {
     normalizeWindows, normalizeSpend, selectPanelWindows, groupPanelWindows, windowTag, tierIconName,
-    migratePanelWindows, shownPercent, pacePercent,
+    migratePanelWindows, shownPercent, pacePercent, shownPace,
 } from './lib/usageModel.js';
 import {uiStyle, loadOverrides, boldNumbersMarkup, hoverShade, formatColor} from './lib/uiStyle.js';
 
@@ -373,7 +373,8 @@ class Meter {
     // drives the color and must always come from the share used, so
     // projection can tint without resizing; with left set, a warn or crit
     // level also tints the track (see trackTint). pace places the pace
-    // marker, and null (extra usage) shows none.
+    // marker on the bar as shown, so with left set it is the share left
+    // (shownPace), and null (extra usage) shows none.
     setValue(pct, caption, level, left = false, pace = null) {
         this._pct.text = `${Math.round(pct)}%${left ? ' left' : ''}`;
         this._fraction = Math.max(0, Math.min(100, pct)) / 100;
@@ -1287,7 +1288,8 @@ class ProfileView {
         if (note)
             caption = caption ? `${caption} · ${note}` : note;
 
-        meter.setValue(shownPercent(util, left), caption, level, left, pacePercent(w.resetsAt, w.totalSeconds));
+        meter.setValue(shownPercent(util, left), caption, level, left,
+            shownPace(pacePercent(w.resetsAt, w.totalSeconds), left));
     }
 
     // Final level for a normalised window: the computed burn consequence,
