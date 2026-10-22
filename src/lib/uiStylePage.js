@@ -41,8 +41,10 @@ function defaultText(prop) {
     }
     if (prop.type === 'bool')
         return prop.def ? 'on' : 'off';
-    if (prop.def === null)
-        return prop.type === 'color' ? 'the panel\'s text color' : 'the panel\'s font size';
+    if (prop.def === null) {
+        const own = propGroup(prop.id).page === 'popup' ? 'the popup\'s' : 'the panel\'s';
+        return prop.type === 'color' ? `${own} text color` : `${own} font size`;
+    }
     if (prop.type === 'choice')
         return prop.options.find(([value]) => value === prop.def)[1].toLowerCase();
     return prop.type === 'color' ? prop.def : `${prop.def}${prop.type}`;

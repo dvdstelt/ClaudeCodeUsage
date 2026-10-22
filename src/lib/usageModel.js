@@ -10,7 +10,8 @@
 // specific model (e.g. Fable) or surface. We prefer that array when present and
 // fall back to the legacy keys for older responses / accounts.
 
-// Window length (seconds) by limit `group`, for the burn-rate projection.
+// Window length (seconds) by limit `group`, for the burn-rate projection and
+// the popup's pace marker.
 const FIVE_HOUR_SECONDS = 5 * 3600;
 const SEVEN_DAY_SECONDS = 7 * 24 * 3600;
 export const GROUP_SECONDS = {session: FIVE_HOUR_SECONDS, weekly: SEVEN_DAY_SECONDS};
@@ -335,6 +336,25 @@ export function groupPanelWindows(windows) {
     return groups;
 }
 
+// ---- pace ----
+
+// The utilization (0-100) that an even rate of use would have reached by now,
+// which is the share of the window that has passed: one day into a 7-day
+// window, 1/7. The popup draws its pace marker there (at shownPace), so a fill
+// past the marker is ahead of pace. null when the window has no reset time (a per-model
+// window nobody has used yet) or no known length, and once the reset has
+// passed, since the usage is stale until the next poll. A reset more than one
+// window away (a clock that runs behind) counts as the start of the window.
+export function pacePercent(resetsAt, totalSeconds, now = Date.now()) {
+    const reset = resetMs(resetsAt);
+    if (reset === null || !(totalSeconds > 0))
+        return null;
+    const remaining = (reset - now) / 1000;
+    if (remaining <= 0)
+        return null;
+    return Math.max(0, (1 - remaining / totalSeconds) * 100);
+}
+
 // ---- subscription tier icon ----
 
 // Tiers that have artwork in icons/ (tier-<name>-symbolic.svg). Add a name
@@ -374,4 +394,13 @@ export function windowTag(w) {
 // never goes below 0 for a window over its limit.
 export function shownPercent(util, remaining) {
     return remaining ? Math.max(0, 100 - Math.round(util)) : util;
+}
+
+// Where the pace marker goes on a bar that fills to shownPercent: the pace
+// (pacePercent) as is, or with "Show usage left" on, the share an even rate of
+// use leaves by now. So the line is always where the fill would be, and a fill
+// ahead of pace is past the line in one mode and short of it in the other.
+// Not rounded, so the line moves smoothly. null (no marker) stays null.
+export function shownPace(pace, remaining) {
+    return pace === null || !remaining ? pace : 100 - pace;
 }

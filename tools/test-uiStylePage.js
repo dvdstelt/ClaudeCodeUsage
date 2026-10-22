@@ -227,6 +227,21 @@ test('a shared value is on the "Shared UI" tab only, and the rows that follow it
     assert(tier.control.rgba.equal(grey) && secondary.control.rgba.equal(grey), 'and so are the rows that follow');
 });
 
+test('the pace marker: a switch that is on, and the popup\'s text color until one is set', () => {
+    const show = popup.rows.get('pace.show');
+    const color = popup.rows.get('pace.color');
+    assert(show.control instanceof Gtk.Switch && show.control.active, 'on by default');
+    assert(!color.reset.visible && color.reset.tooltip_text.includes('the popup\'s text color'), color.reset.tooltip_text);
+    assert(popup.rows.get('pace.width').control.value === 2, 'a 2px line');
+    assert(popup.rows.get('pace.reach').control.value === 3, 'reaching 3px above and below the bar');
+    show.control.set_active(false);
+    settle();
+    assert(stored()['pace.show'] === false && show.reset.visible, 'off is stored');
+    show.reset.emit('clicked');
+    settle();
+    assert(!('pace.show' in stored()) && show.control.active && !show.reset.visible, 'reset: on again');
+});
+
 test('"Reset all" only resets its own tab', () => {
     popup.rows.get('popup.width').control.set_value(400);
     popup.rows.get('separator.color').control.rgba = rgba('#ff0000');

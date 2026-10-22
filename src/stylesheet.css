@@ -143,6 +143,9 @@
 .cu-fill {
     height: 7px;
 }
+/* The pace marker (.cu-pace-marker) has no rule: it paints its line in the
+   popup's text color, or in its "Pace marker" color, and takes its size from
+   its settings and the bar height. */
 
 .cu-extra {
     margin: 2px 0 4px 0;
