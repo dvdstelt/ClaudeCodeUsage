@@ -6,7 +6,7 @@ import {existsSync} from 'node:fs';
 import {
     normalizeWindows, normalizeSpend, apiSeverityLevel, limitLabel, limitKey,
     selectPanelWindows, windowTag, migratePanelWindows, groupPanelWindows, tierIconName,
-    shownPercent, PANEL_SELECTORS, TIER_ICONS,
+    shownPercent, pacePercent, PANEL_SELECTORS, TIER_ICONS,
 } from '../src/lib/usageModel.js';
 
 let passed = 0;
@@ -242,6 +242,51 @@ test('groupPanelWindows: a window with no reset time joins the weekly group', ()
     assert.equal(none[0].resetsAt, null);
     // A session window with no reset is simply its own group.
     assert.deepEqual(shape(groupPanelWindows([w('s', 'session', null), w('w', 'weekly', reset)])), [['s'], ['w']]);
+});
+
+// --- the popup's pace marker ---
+test('pacePercent: the share of the window that has passed', () => {
+    const HOUR = 3600;
+    const reset = '2026-07-15T14:00:00+00:00';
+    const before = hours => Date.parse(reset) - hours * HOUR * 1000;
+    // One day into a 7-day window: 1/7 of the way.
+    assert.ok(Math.abs(pacePercent(reset, 7 * 24 * HOUR, before(6 * 24)) - 100 / 7) < 1e-9);
+    // Halfway through the 5-hour session, and just before its end.
+    assert.equal(pacePercent(reset, 5 * HOUR, before(2.5)), 50);
+    assert.ok(pacePercent(reset, 5 * HOUR, before(0.01)) > 99);
+    // The window has only just started.
+    assert.equal(pacePercent(reset, 5 * HOUR, before(5)), 0);
+    // A reset more than one window away (a clock that runs behind) is the start.
+    assert.equal(pacePercent(reset, 5 * HOUR, before(6)), 0);
+    // Any timestamp notation the API uses.
+    assert.equal(pacePercent('2026-07-15T14:00:00.076954Z', 5 * HOUR, Date.parse('2026-07-15T11:30:00.076954Z')), 50);
+});
+
+test('pacePercent: no marker without a reset time, a window length, or once the reset has passed', () => {
+    const reset = '2026-07-15T14:00:00+00:00';
+    const now = Date.parse('2026-07-15T12:00:00+00:00');
+    // A per-model window nobody has used yet has no reset time.
+    assert.equal(pacePercent(null, 5 * 3600, now), null);
+    assert.equal(pacePercent(undefined, 5 * 3600, now), null);
+    assert.equal(pacePercent('garbage', 5 * 3600, now), null);
+    // A window of a kind whose length is unknown.
+    assert.equal(pacePercent(reset, null, now), null);
+    assert.equal(pacePercent(reset, 0, now), null);
+    // At or past the reset the usage is stale until the next poll.
+    assert.equal(pacePercent(reset, 5 * 3600, Date.parse(reset)), null);
+    assert.equal(pacePercent(reset, 5 * 3600, Date.parse(reset) + 1000), null);
+});
+
+test('pacePercent: works on normalised windows, and defaults to now', () => {
+    const [session, weekly] = normalizeWindows(live);
+    const now = Date.parse('2026-07-13T05:10:00+00:00');   // 2.5h before the session reset
+    assert.equal(pacePercent(session.resetsAt, session.totalSeconds, now), 50);
+    // 2 days and 8h50m before the weekly reset: 4 days 15h10m of 7 days have passed.
+    const weeklyPace = pacePercent(weekly.resetsAt, weekly.totalSeconds, now);
+    assert.ok(Math.abs(weeklyPace - ((4 * 24 + 15 + 10 / 60) / (7 * 24)) * 100) < 1e-9);
+    // Without `now`: the clock, so a reset an hour away in a 5-hour window is at 80%.
+    const inAnHour = new Date(Date.now() + 3600 * 1000).toISOString();
+    assert.ok(Math.abs(pacePercent(inAnHour, 5 * 3600) - 80) < 0.1);
 });
 
 test('tierIconName: most specific artwork, then the base tier, else none', () => {
