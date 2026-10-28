@@ -296,7 +296,11 @@ export const UI_STYLE_GROUPS = [
         title: 'Subscription pill',
         page: POPUP,
         props: [
-            ...text('pill', 9, '#ffd9a8', 'bold'),
+            pt('pill.font-size', 'Font size', 9, target('pill', 'font-size')),
+            weight('pill.font-weight', 'Font weight', 'bold', target('pill', 'font-weight')),
+            // No default: a fixed light color cannot be read on a light popup.
+            color('pill.color', 'Color', null, target('pill', 'color'),
+                {subtitle: 'Default: the popup\'s text color.'}),
             color('pill.background-color', 'Background', 'rgba(230, 97, 0, 0.18)', target('pill', 'background-color')),
             color('pill.border-color', 'Border color', 'rgba(230, 97, 0, 0.4)', target('pill', 'border-color')),
             px('pill.padding-v', 'Padding, top and bottom', 3, target('pill', ['padding-top', 'padding-bottom'])),

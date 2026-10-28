@@ -266,6 +266,43 @@ function wrapLabel(label) {
     return label;
 }
 
+// The layout of a popup meter's track: its one child, the fill, gets the set
+// share of the track's width. The fill is sized while the track is laid out,
+// so it always follows the width the popup gives the track (issue #3), and a
+// value set while the popup is closed lands when it opens.
+const FillLayout = GObject.registerClass(
+class FillLayout extends Clutter.LayoutManager {
+    _init() {
+        super._init();
+        this._fraction = 0;
+    }
+
+    setFraction(fraction) {
+        if (fraction === this._fraction)
+            return;
+        this._fraction = fraction;
+        this.layout_changed();
+    }
+
+    // The track's own width comes from the stylesheet and the popup.
+    vfunc_get_preferred_width(_container, _forHeight) {
+        return [0, 0];
+    }
+
+    vfunc_get_preferred_height(container, forWidth) {
+        return container.get_first_child()?.get_preferred_height(forWidth) ?? [0, 0];
+    }
+
+    vfunc_allocate(container, box) {
+        const fill = container.get_first_child();
+        if (!fill)
+            return;
+        const fillBox = box.copy();
+        fillBox.set_size(Math.round(this._fraction * box.get_width()), box.get_height());
+        fill.allocate(fillBox);
+    }
+});
+
 // The pace marker of a popup meter: a short line across the bar at the usage
 // that an even rate of use gives by now (pacePercent), reaching a little above
 // and below the bar. It spans the whole bar and paints its line itself, so the
@@ -328,7 +365,11 @@ class Meter {
         row.add_child(this._name);
         row.add_child(this._pct);
 
-        this._track = new St.BoxLayout({style_class: 'cu-track', x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        this._fillLayout = new FillLayout();
+        this._track = new St.Widget({
+            style_class: 'cu-track', layout_manager: this._fillLayout,
+            x_expand: true, y_align: Clutter.ActorAlign.CENTER,
+        });
         this._fill = new St.Widget({style_class: 'cu-fill cu-ok'});
         this._track.add_child(this._fill);
         // The pace marker reaches above and below the track, so it sits over
@@ -338,14 +379,6 @@ class Meter {
         this._bar = new St.Widget({layout_manager: new Clutter.BinLayout(), x_expand: true});
         this._bar.add_child(this._track);
         this._bar.add_child(this._pace);
-        // The fill is sized as a fraction of the track's *actual* allocated
-        // width, recomputed whenever the track is (re)laid out. Sizing off a
-        // fixed pixel constant left a 100% bar short of the end whenever the
-        // popup stretched the track wider than that constant (issue #3).
-        this._fraction = 0;
-        // connectObject ties the handler to this meter, so destroy() can drop
-        // it with a single disconnectObject(this).
-        this._track.connectObject('notify::width', () => this._resizeFill(), this);
 
         this._caption = wrapLabel(new St.Label({text: '', style_class: 'cu-caption'}));
 
@@ -377,8 +410,7 @@ class Meter {
     // (shownPace), and null (extra usage) shows none.
     setValue(pct, caption, level, left = false, pace = null) {
         this._pct.text = `${Math.round(pct)}%${left ? ' left' : ''}`;
-        this._fraction = Math.max(0, Math.min(100, pct)) / 100;
-        this._resizeFill();
+        this._fillLayout.setFraction(Math.max(0, Math.min(100, pct)) / 100);
         this._level = level;
         this._left = left;
         this._fill.style_class = `cu-fill ${levelClass(level)}`;
@@ -389,15 +421,6 @@ class Meter {
         this._caption.visible = !!caption;
     }
 
-    // Size the fill to the current fraction of the track's real width, so a
-    // 100% window always reaches the end no matter how wide the popup lays the
-    // track out. Called on every value change and on every track re-allocation
-    // (the first allocation lands after construction, when width is still 0).
-    _resizeFill() {
-        const w = this._track?.get_width() ?? 0;
-        this._fill.set_width(Math.round(this._fraction * w));
-    }
-
     // Update the meter's title in place (a reused meter can change label, e.g.
     // if the API renames a scoped window).
     setName(name) {
@@ -406,8 +429,7 @@ class Meter {
 
     setMuted() {
         this._pct.text = '—';
-        this._fraction = 0;
-        this._fill.set_width(0);
+        this._fillLayout.setFraction(0);
         this._pace.setPace(null);
         this._caption.visible = false;
         this._left = false;
@@ -418,9 +440,6 @@ class Meter {
     // Each child is destroyed explicitly (leaf-first) so the destruction is
     // unambiguous to both the runtime and static review tooling.
     destroy() {
-        // Drop the track's notify::width handler before tearing the actors
-        // down, so nothing can fire mid-destruction.
-        this._track?.disconnectObject(this);
         this._name?.destroy();
         this._pct?.destroy();
         this._fill?.destroy();
@@ -436,6 +455,7 @@ class Meter {
         this._pace = null;
         this._track = null;
         this._bar = null;
+        this._fillLayout = null;
         this.root = null;
     }
 }

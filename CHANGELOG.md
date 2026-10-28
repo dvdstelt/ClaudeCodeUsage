@@ -17,6 +17,16 @@ Thanks to @Power-tile for the idea of the pace marker (#26).
   warning stays visible when little is left. Off by default (#25).
 - A pace marker on the meters in the dropdown: a thin line at the usage that an even rate of use gives by now. For example, one day into the 7-day window the line is at 1/7 (about 14%). A fill past the line is ahead of pace. With "Show usage left" on, the line is at the share an even rate leaves (6/7 in that example), so a fill short of the line is ahead of pace. The marker is on by default. The new "Pace marker" group on the "Popup UI" tab has a switch for it, its color (by default the popup's text color), its line width, and how far it reaches above and below the bar. A meter with no reset time and the extra-usage meter have no line.
 
+### Fixed
+- The bars in the dropdown could stop short of the end again: a refresh while
+  the dropdown was closed sized them from the track's default 300px instead of
+  its real width, and opening the dropdown did not correct them. Most visible
+  with "Show usage left", where a 100% bar stopped about 20px short (#32).
+- The plan pill in the dropdown ("TEAM", "MAX 5x") was nearly invisible with
+  the light shell style: its text was a fixed light peach. It now takes the
+  dropdown's text color, so it reads in light and dark mode. Its color can
+  still be set under "Popup UI" (#32).
+
 ## 1.5.1 - 2026-10-14
 
 Thanks to @zeroSteiner for the extra-usage bar that pooled and enterprise accounts now get (#18), and to @francisco-polaco for the GNOME Shell 51 fix (#28).
